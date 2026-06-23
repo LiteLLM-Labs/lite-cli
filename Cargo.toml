@@ -1,0 +1,26 @@
+[package]
+name = "lite-cli"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "lite"
+path = "src/main.rs"
+
+[dependencies]
+tokio = { version = "1", features = ["full"] }
+axum = { version = "0.7", features = ["http1"] }
+reqwest = { version = "0.12", default-features = false, features = ["stream", "rustls-tls"] }
+clap = { version = "4", features = ["derive"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+anyhow = "1"
+futures-util = "0.3"
+bytes = "1"
+dirs = "5"
+tokio-util = { version = "0.7", features = ["rt"] }
+
+[profile.release]
+strip = true
+lto = true
