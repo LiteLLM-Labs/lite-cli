@@ -103,9 +103,14 @@ async fn main() -> Result<()> {
 }
 
 async fn run_claude(args: ClaudeArgs) -> Result<()> {
+    // Resolve upstream the same way claude resolves it: explicit flag, process env, then
+    // ~/.claude/settings.json `env`, then the public default. Pulling from settings keeps the
+    // upstream and the auth token in sync when neither is exported in the shell.
     let upstream = args
         .upstream
-        .or_else(|| std::env::var("ANTHROPIC_BASE_URL").ok())
+        .filter(|s| !s.is_empty())
+        .or_else(|| std::env::var("ANTHROPIC_BASE_URL").ok().filter(|s| !s.is_empty()))
+        .or_else(|| settings_env("ANTHROPIC_BASE_URL"))
         .unwrap_or_else(|| DEFAULT_UPSTREAM.to_string())
         .trim_end_matches('/')
         .to_string();
@@ -155,17 +160,16 @@ async fn run_claude(args: ClaudeArgs) -> Result<()> {
         logger.session_path.display()
     );
 
-    // Launch claude pointed at the proxy. Claude applies settings.json `env` over the process
-    // environment, so a plain env override is not enough — inject the base URL via `--settings`,
-    // which has higher precedence than user settings. Auth token is left untouched so it flows
-    // through unchanged.
+    // Point claude at the proxy. claude reads ANTHROPIC_BASE_URL from settings.json `env`, which
+    // overrides the process environment — so inject the override via `--settings` (higher
+    // precedence, and it *merges* with the user's `env`, preserving their auth token). claude
+    // sends its own Authorization header; the proxy forwards it verbatim, so we do no auth work.
     let base_url = format!("http://127.0.0.1:{proxy_port}");
-    let settings = format!("{{\"env\":{{\"ANTHROPIC_BASE_URL\":\"{base_url}\"}}}}");
+    let settings = serde_json::json!({ "env": { "ANTHROPIC_BASE_URL": base_url } }).to_string();
     let status = tokio::process::Command::new("claude")
         .arg("--settings")
         .arg(&settings)
         .args(&args.claude_args)
-        .env("ANTHROPIC_BASE_URL", &base_url)
         .status()
         .await
         .context("launching `claude` (is it on PATH?)")?;
@@ -194,6 +198,18 @@ fn print_summary(logger: &Logger) {
         }
     }
     eprintln!("  log: {}", logger.session_path.display());
+}
+
+/// Read a single key from the `env` block of ~/.claude/settings.json.
+fn settings_env(key: &str) -> Option<String> {
+    let settings_path = dirs::home_dir()?.join(".claude").join("settings.json");
+    let content = std::fs::read_to_string(settings_path).ok()?;
+    let json: serde_json::Value = serde_json::from_str(&content).ok()?;
+    json.get("env")?
+        .get(key)
+        .and_then(|v| v.as_str())
+        .filter(|s| !s.is_empty())
+        .map(|s| s.to_string())
 }
 
 fn open_browser(url: &str) {
