@@ -79,6 +79,11 @@
     </section>
 
     <section>
+      <h2>Spend by day <span id="day-meta" style="float:right;color:var(--muted);font-weight:400"></span></h2>
+      <canvas id="dayChart"></canvas>
+    </section>
+
+    <section>
       <h2>Spend by session</h2>
       <div id="sessions"><div class="empty">No data yet…</div></div>
     </section>
@@ -172,6 +177,39 @@ function drawSpend(series) {
   ctx.strokeStyle = '#5ad19a'; ctx.lineWidth = 1.5; ctx.stroke();
 }
 
+function drawDays(rows) {
+  const cv = document.getElementById('dayChart');
+  const dpr = window.devicePixelRatio || 1;
+  const w = cv.clientWidth, h = cv.clientHeight;
+  cv.width = w * dpr; cv.height = h * dpr;
+  const ctx = cv.getContext('2d');
+  ctx.scale(dpr, dpr);
+  ctx.clearRect(0, 0, w, h);
+  const meta = document.getElementById('day-meta');
+  if (!rows.length) { meta.textContent = ''; return; }
+  const pad = 8, labelH = 16;
+  const max = Math.max(1e-9, ...rows.map(r => r.cost_usd || 0));
+  const n = rows.length;
+  const gap = n > 60 ? 1 : 2;
+  const bw = Math.max(1, (w - 2 * pad) / n - gap);
+  const peak = rows.reduce((a, b) => (b.cost_usd > a.cost_usd ? b : a), rows[0]);
+  meta.textContent = `${rows[0].key} → ${rows[n-1].key} · peak ${money(peak.cost_usd)} (${peak.key})`;
+  rows.forEach((r, i) => {
+    const x = pad + i * ((w - 2 * pad) / n);
+    const bh = ((r.cost_usd || 0) / max) * (h - 2 * pad - labelH);
+    const grad = ctx.createLinearGradient(0, h - labelH - bh, 0, h - labelH);
+    grad.addColorStop(0, '#5ad19a'); grad.addColorStop(1, '#6aa6ff');
+    ctx.fillStyle = grad;
+    ctx.fillRect(x, h - labelH - bh, bw, bh);
+  });
+  // x-axis end labels
+  ctx.fillStyle = getComputedStyle(document.body).getPropertyValue('--muted');
+  ctx.font = '10px ui-monospace, monospace';
+  ctx.fillText(rows[0].key, pad, h - 3);
+  const last = rows[n-1].key;
+  ctx.fillText(last, w - pad - ctx.measureText(last).width, h - 3);
+}
+
 async function tick() {
   try {
     const r = await fetch('/api/usage?scope=' + scope);
@@ -190,6 +228,7 @@ async function tick() {
     renderBars('models', d.by_model || [], (r) => r.key);
     renderRows(d.recent || []);
     drawSpend(d.series || []);
+    drawDays(d.by_day || []);
   } catch (e) { /* dashboard may be momentarily unavailable */ }
 }
 tick();

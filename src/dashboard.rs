@@ -69,6 +69,7 @@ struct UsageResponse {
     by_session: Vec<GroupRow>,
     by_project: Vec<GroupRow>,
     by_model: Vec<GroupRow>,
+    by_day: Vec<GroupRow>,
     recent: Vec<RecentTurn>,
     series: Vec<SeriesPoint>,
 }
@@ -122,6 +123,7 @@ async fn api_usage(
     let mut by_session: BTreeMap<String, GroupRow> = BTreeMap::new();
     let mut by_project: BTreeMap<String, GroupRow> = BTreeMap::new();
     let mut by_model: BTreeMap<String, GroupRow> = BTreeMap::new();
+    let mut by_day: BTreeMap<String, GroupRow> = BTreeMap::new();
     let mut recent: Vec<RecentTurn> = Vec::new();
 
     for t in &turns {
@@ -158,6 +160,12 @@ async fn api_usage(
         accumulate(by_model.entry(model.clone()).or_default(), t, &model, cost);
         by_model.get_mut(&model).unwrap().key = model.clone();
 
+        // Day bucket from the ISO timestamp (YYYY-MM-DD).
+        let day = t.ts.get(..10).unwrap_or("").to_string();
+        let drow = by_day.entry(day.clone()).or_default();
+        accumulate(drow, t, &model, cost);
+        drow.key = day;
+
         resp.series.push(SeriesPoint {
             i: resp.turns as usize,
             cost,
@@ -182,6 +190,8 @@ async fn api_usage(
     resp.by_session = sorted_by_cost(by_session);
     resp.by_project = sorted_by_cost(by_project);
     resp.by_model = sorted_by_cost(by_model);
+    // Days stay chronological for a time-series chart.
+    resp.by_day = by_day.into_values().collect();
     recent.reverse();
     recent.truncate(100);
     resp.recent = recent;
