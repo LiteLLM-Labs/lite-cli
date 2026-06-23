@@ -14,9 +14,21 @@ claude  ──>  lite proxy (localhost)  ──>  upstream API (Anthropic / Lite
 ## Install
 
 ```sh
-cargo build --release
-cp target/release/lite ~/.local/bin/    # or anywhere on your PATH
+./install.sh                 # builds release, installs to ~/.local/bin, re-signs on macOS
+PREFIX=/usr/local/bin ./install.sh   # custom install location
 ```
+
+Or manually:
+
+```sh
+cargo build --release
+cp target/release/lite ~/.local/bin/lite
+codesign -s - -f ~/.local/bin/lite   # macOS only — see note below
+```
+
+> **macOS note:** `cp` invalidates the binary's ad-hoc code signature on Apple Silicon, after
+> which the kernel kills it on launch (`zsh: killed`, exit 137). Re-sign with
+> `codesign -s - -f <path>` after copying. `install.sh` does this automatically.
 
 ## Usage
 
