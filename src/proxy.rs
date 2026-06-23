@@ -53,6 +53,13 @@ async fn proxy(state: Arc<ProxyState>, req: axum::extract::Request) -> Result<Re
         .map(|pq| pq.as_str().to_string())
         .unwrap_or_else(|| req.uri().path().to_string());
 
+    // Claude Code tags each request with its session id; capture it for per-session spend.
+    let session_id = req
+        .headers()
+        .get("x-claude-code-session-id")
+        .and_then(|v| v.to_str().ok())
+        .map(|s| s.to_string());
+
     // Forward headers minus hop-by-hop.
     let mut fwd_headers = HeaderMap::new();
     for (name, value) in req.headers() {
@@ -100,6 +107,7 @@ async fn proxy(state: Arc<ProxyState>, req: axum::extract::Request) -> Result<Re
     let path_log = path_and_query.split('?').next().unwrap_or("").to_string();
     let method_s = method.to_string();
     let status_u = status.as_u16();
+    let session_id_stream = session_id.clone();
 
     if is_stream {
         // Tee the SSE stream: forward each chunk to the client, feed a copy to the parser,
@@ -135,6 +143,7 @@ async fn proxy(state: Arc<ProxyState>, req: axum::extract::Request) -> Result<Re
                 start.elapsed().as_millis() as u64,
                 usage,
             );
+            rec.session_id = session_id_stream;
             if logger.log_bodies {
                 rec.request_body = request_json;
             }
@@ -158,6 +167,7 @@ async fn proxy(state: Arc<ProxyState>, req: axum::extract::Request) -> Result<Re
             start.elapsed().as_millis() as u64,
             usage,
         );
+        rec.session_id = session_id;
         if state.logger.log_bodies {
             rec.request_body = request_json;
             rec.response_body = serde_json::from_slice(&resp_bytes).ok();

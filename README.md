@@ -52,16 +52,22 @@ lite logs --follow               # live tail
 | `--bodies` | off | log full request + response bodies |
 | `--dashboard` | off | also start the web dashboard + open browser |
 
-## Spend tracking
+## Spend dashboard
 
-Per-request USD cost is computed from LiteLLM's
+`lite dashboard` reads **Claude Code's own session transcripts** (`~/.claude/projects/**/*.jsonl`)
+— so it shows spend across **every** session, retroactively, with no proxy required. It breaks
+spend down **by session, by project, and by model**, plus a cumulative spend-over-time chart and a
+cache-savings figure. Toggle **All projects / This project** in the header.
+
+Cost is computed from LiteLLM's
 [`model_prices_and_context_window.json`](https://github.com/BerriAI/litellm/blob/litellm_internal_staging/model_prices_and_context_window.json)
 (fetched once, cached to `~/.lite/model_prices.json`, refreshed every 24h). The math is a faithful
-port of litellm's `generic_cost_per_token` token path — including separate input / output /
-cache-read / cache-write rates and long-context (`_above_Nk_tokens`) tiered pricing, where the
-threshold is the **total** context (input + cache read + cache write). Verified to match litellm's
-function exactly. Spend shows in the session summary, the `lite logs` table, and the dashboard
-SPEND card.
+port of litellm's `generic_cost_per_token` — separate input / output / cache-read / cache-write
+rates, long-context (`_above_Nk_tokens`) tiered pricing keyed on **total** context, the 5m/1h
+cache-creation split, and service tier. Verified to match litellm's function exactly.
+
+> The proxy's own log (`lite claude` → `~/.lite/logs`) is for **live** low-level observation and
+> `lite logs`; the dashboard sources spend from Claude's transcripts. See `AGENTS.md`.
 
 ## Where logs live
 

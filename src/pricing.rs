@@ -138,10 +138,49 @@ impl Pricing {
 
         // Threshold basis = total context (matches anthropic's prompt_tokens).
         let total = input_tokens + cache_read_tokens + cache_creation_tokens;
+        let rate = self.rate_resolver(costs, total, None);
 
-        // Pick the highest tier whose threshold the total exceeds (litellm sorts desc, first hit),
-        // and keep that key's exact suffix (e.g. `_above_200k_tokens`) to apply to every rate.
-        let suffix: Option<String> = costs
+        input_tokens as f64 * rate(INPUT_KEY)
+            + output_tokens as f64 * rate(OUTPUT_KEY)
+            + cache_read_tokens as f64 * rate(CACHE_READ_KEY)
+            + cache_creation_tokens as f64 * rate(CACHE_CREATION_KEY)
+    }
+
+    /// Like `cost`, but using the richer transcript data: service tier and the 5m/1h
+    /// cache-creation split (litellm bills 5m at the base write rate, 1h at `_above_1hr`).
+    pub fn cost_detailed(
+        &self,
+        model: Option<&str>,
+        input_tokens: u64,
+        output_tokens: u64,
+        cache_read_tokens: u64,
+        cache_creation_5m: u64,
+        cache_creation_1h: u64,
+        service_tier: Option<&str>,
+    ) -> f64 {
+        let Some(costs) = model.and_then(|m| self.lookup(m)) else {
+            return 0.0;
+        };
+        let total = input_tokens + cache_read_tokens + cache_creation_5m + cache_creation_1h;
+        let rate = self.rate_resolver(costs, total, service_tier);
+
+        input_tokens as f64 * rate(INPUT_KEY)
+            + output_tokens as f64 * rate(OUTPUT_KEY)
+            + cache_read_tokens as f64 * rate(CACHE_READ_KEY)
+            + cache_creation_5m as f64 * rate(CACHE_CREATION_KEY)
+            + cache_creation_1h as f64 * rate("cache_creation_input_token_cost_above_1hr")
+    }
+
+    /// Build a rate lookup for a request: resolves base keys against the matching long-context
+    /// tier (`_above_<N>_tokens`) and service tier (`_flex`/`_priority`), most-specific first.
+    fn rate_resolver<'a>(
+        &self,
+        costs: &'a CostMap,
+        total: u64,
+        service_tier: Option<&str>,
+    ) -> impl Fn(&str) -> f64 + 'a {
+        // Highest threshold the total exceeds; keep that key's exact `_above_..._tokens` suffix.
+        let thr: Option<String> = costs
             .keys()
             .filter_map(|k| {
                 k.strip_prefix(INPUT_KEY)
@@ -152,20 +191,41 @@ impl Pricing {
             .max_by_key(|(t, _)| *t)
             .map(|(_, suf)| suf);
 
-        // Resolve a rate: tiered key if present, else base key, else 0.
-        let rate = |base: &str| -> f64 {
-            if let Some(suf) = &suffix {
-                if let Some(v) = costs.get(&format!("{base}{suf}")) {
+        // Only flex/priority have dedicated keys; standard/unknown fall back to base.
+        let tier: Option<String> = service_tier
+            .filter(|t| *t == "flex" || *t == "priority")
+            .map(|t| format!("_{t}"));
+
+        move |base: &str| -> f64 {
+            // Most specific → least: tier+threshold, threshold, tier, base.
+            if let (Some(t), Some(s)) = (&tier, &thr) {
+                if let Some(v) = costs.get(&format!("{base}{t}{s}")) {
+                    return *v;
+                }
+            }
+            if let Some(s) = &thr {
+                if let Some(v) = costs.get(&format!("{base}{s}")) {
+                    return *v;
+                }
+            }
+            if let Some(t) = &tier {
+                if let Some(v) = costs.get(&format!("{base}{t}")) {
                     return *v;
                 }
             }
             costs.get(base).copied().unwrap_or(0.0)
-        };
+        }
+    }
 
-        input_tokens as f64 * rate(INPUT_KEY)
-            + output_tokens as f64 * rate(OUTPUT_KEY)
-            + cache_read_tokens as f64 * rate(CACHE_READ_KEY)
-            + cache_creation_tokens as f64 * rate(CACHE_CREATION_KEY)
+    /// USD saved by cache reads vs paying the full input rate for those tokens.
+    /// (Uses base rates — a savings estimate, not tier-adjusted.)
+    pub fn cache_savings(&self, model: Option<&str>, cache_read_tokens: u64) -> f64 {
+        let Some(costs) = model.and_then(|m| self.lookup(m)) else {
+            return 0.0;
+        };
+        let input = costs.get(INPUT_KEY).copied().unwrap_or(0.0);
+        let cached = costs.get(CACHE_READ_KEY).copied().unwrap_or(0.0);
+        (cache_read_tokens as f64 * (input - cached)).max(0.0)
     }
 }
 

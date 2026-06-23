@@ -3,6 +3,7 @@ mod log;
 mod logs_cmd;
 mod pricing;
 mod proxy;
+mod transcripts;
 mod usage;
 
 use std::path::PathBuf;

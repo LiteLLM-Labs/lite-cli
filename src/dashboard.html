@@ -3,11 +3,11 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>lite — usage</title>
+<title>lite — spend</title>
 <style>
   :root {
     --bg: #0b0d10; --panel: #14181d; --line: #232a32;
-    --fg: #e6edf3; --muted: #8b98a5; --accent: #5ad19a; --accent2: #6aa6ff;
+    --fg: #e6edf3; --muted: #8b98a5; --accent: #5ad19a; --accent2: #6aa6ff; --warn: #f0b860;
   }
   * { box-sizing: border-box; }
   body {
@@ -20,100 +20,135 @@
   }
   header h1 { font-size: 16px; margin: 0; letter-spacing: .5px; }
   .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 8px var(--accent); }
-  .session { color: var(--muted); font-size: 12px; margin-left: auto; }
+  .toggle { display: inline-flex; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; margin-left: 16px; }
+  .toggle button {
+    background: transparent; color: var(--muted); border: 0; padding: 5px 12px;
+    font: inherit; font-size: 12px; cursor: pointer;
+  }
+  .toggle button.active { background: var(--accent2); color: #06121f; }
+  .src { color: var(--muted); font-size: 12px; margin-left: auto; }
+  .updated { color: var(--muted); font-size: 11px; }
   main { padding: 24px; max-width: 1100px; margin: 0 auto; }
-  .cards { display: grid; grid-template-columns: repeat(5, 1fr); gap: 14px; margin-bottom: 24px; }
+  .cards { display: grid; grid-template-columns: repeat(5, 1fr); gap: 14px; margin-bottom: 20px; }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 16px; }
   .card.spend { border-color: var(--accent); }
   .card.spend .value { color: var(--accent); }
-  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 16px; }
+  .card.save .value { color: var(--accent2); }
   .card .label { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .8px; }
   .card .value { font-size: 28px; font-weight: 600; margin-top: 6px; }
+  .card .sub { color: var(--muted); font-size: 11px; margin-top: 4px; }
   section { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 18px; margin-bottom: 20px; }
   section h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .8px; color: var(--muted); margin: 0 0 14px; }
-  .bar-row { display: grid; grid-template-columns: 220px 1fr 200px; align-items: center; gap: 10px; margin-bottom: 8px; }
+  .bar-row { display: grid; grid-template-columns: 280px 1fr 230px; align-items: center; gap: 10px; margin-bottom: 8px; }
   .bar-track { background: #0b0d10; border-radius: 6px; height: 18px; overflow: hidden; }
   .bar-fill { background: linear-gradient(90deg, var(--accent2), var(--accent)); height: 100%; }
   .bar-row .name { color: var(--fg); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .bar-row .name small { color: var(--muted); }
   .bar-row .num { text-align: right; color: var(--muted); }
   table { width: 100%; border-collapse: collapse; }
   th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--line); white-space: nowrap; }
   th { color: var(--muted); font-weight: 500; font-size: 11px; text-transform: uppercase; }
   td.num, th.num { text-align: right; }
-  canvas { width: 100%; height: 220px; display: block; }
+  canvas { width: 100%; height: 200px; display: block; }
   .empty { color: var(--muted); padding: 20px 0; }
 </style>
 </head>
 <body>
   <header>
     <span class="dot"></span>
-    <h1>lite · usage</h1>
-    <span class="session" id="session">—</span>
+    <h1>lite · spend</h1>
+    <div class="toggle">
+      <button id="t-all" class="active" onclick="setScope('all')">All projects</button>
+      <button id="t-project" onclick="setScope('project')">This project</button>
+    </div>
+    <span class="src" id="src">~/.claude transcripts</span>
+    <span class="updated" id="updated"></span>
   </header>
   <main>
     <div class="cards">
-      <div class="card spend"><div class="label">Spend</div><div class="value" id="c-spend">$0.00</div></div>
-      <div class="card"><div class="label">Requests</div><div class="value" id="c-req">0</div></div>
+      <div class="card spend"><div class="label">Total spend</div><div class="value" id="c-spend">$0.00</div></div>
+      <div class="card save"><div class="label">Cache saved</div><div class="value" id="c-save">$0.00</div><div class="sub" id="c-hit">0% hit rate</div></div>
+      <div class="card"><div class="label">Sessions</div><div class="value" id="c-sess">0</div><div class="sub" id="c-turns">0 turns</div></div>
       <div class="card"><div class="label">Input tokens</div><div class="value" id="c-in">0</div></div>
       <div class="card"><div class="label">Output tokens</div><div class="value" id="c-out">0</div></div>
-      <div class="card"><div class="label">Cache read</div><div class="value" id="c-cache">0</div></div>
     </div>
 
     <section>
-      <h2>Tokens over time (input / output per request)</h2>
-      <canvas id="chart"></canvas>
+      <h2>Spend over time (cumulative USD)</h2>
+      <canvas id="spendChart"></canvas>
     </section>
 
     <section>
-      <h2>By model</h2>
+      <h2>Spend by session</h2>
+      <div id="sessions"><div class="empty">No data yet…</div></div>
+    </section>
+
+    <section>
+      <h2>Spend by project</h2>
+      <div id="projects"><div class="empty">No data yet…</div></div>
+    </section>
+
+    <section>
+      <h2>Spend by model</h2>
       <div id="models"><div class="empty">No data yet…</div></div>
     </section>
 
     <section>
-      <h2>Recent requests</h2>
+      <h2>Recent turns</h2>
       <table>
         <thead><tr>
-          <th>time</th><th>model</th><th class="num">in</th><th class="num">out</th>
-          <th class="num">cost</th><th class="num">ms</th><th class="num">code</th><th>path</th>
+          <th>time</th><th>project</th><th>session</th><th>model</th>
+          <th class="num">in</th><th class="num">out</th><th class="num">cost</th>
         </tr></thead>
-        <tbody id="rows"><tr><td colspan="7" class="empty">No requests yet…</td></tr></tbody>
+        <tbody id="rows"><tr><td colspan="7" class="empty">No turns yet…</td></tr></tbody>
       </table>
     </section>
   </main>
 
 <script>
+let scope = 'all';
 const fmt = (n) => (n ?? 0).toLocaleString();
 const money = (n) => '$' + (n ?? 0).toLocaleString(undefined, { minimumFractionDigits: (n && n < 1 ? 4 : 2), maximumFractionDigits: 4 });
+const base = (p) => (p || '').split('/').filter(Boolean).pop() || p || '-';
+const shortId = (s) => (s || '').slice(0, 8);
 
-function renderModels(by) {
-  const el = document.getElementById('models');
-  if (!by.length) { el.innerHTML = '<div class="empty">No data yet…</div>'; return; }
-  const max = Math.max(1, ...by.map(m => m.cost_usd || 0));
-  el.innerHTML = by.map(m => {
-    const pct = ((m.cost_usd || 0) / max * 100).toFixed(1);
+function setScope(s) {
+  scope = s;
+  document.getElementById('t-all').classList.toggle('active', s === 'all');
+  document.getElementById('t-project').classList.toggle('active', s === 'project');
+  tick();
+}
+
+function renderBars(elId, rows, label) {
+  const el = document.getElementById(elId);
+  if (!rows.length) { el.innerHTML = '<div class="empty">No data yet…</div>'; return; }
+  const max = Math.max(1, ...rows.map(r => r.cost_usd || 0));
+  el.innerHTML = rows.map(r => {
+    const pct = ((r.cost_usd || 0) / max * 100).toFixed(1);
     return `<div class="bar-row">
-      <div class="name" title="${m.model}">${m.model}</div>
+      <div class="name" title="${r.key}">${label(r)}</div>
       <div class="bar-track"><div class="bar-fill" style="width:${pct}%"></div></div>
-      <div class="num">${money(m.cost_usd)} · ${fmt(m.input_tokens + m.output_tokens)} tok</div>
+      <div class="num">${money(r.cost_usd)} · ${fmt(r.input_tokens + r.output_tokens)} tok · ${fmt(r.turns)} turns</div>
     </div>`;
   }).join('');
 }
 
 function renderRows(recent) {
   const el = document.getElementById('rows');
-  if (!recent.length) { el.innerHTML = '<tr><td colspan="8" class="empty">No requests yet…</td></tr>'; return; }
+  if (!recent.length) { el.innerHTML = '<tr><td colspan="7" class="empty">No turns yet…</td></tr>'; return; }
   el.innerHTML = recent.map(r => {
-    const t = (r.ts.split('T')[1] || r.ts).replace('Z','');
+    const t = (r.ts.split('T')[1] || r.ts).replace('Z','').split('.')[0];
     return `<tr>
-      <td>${t}</td><td>${r.model ?? '-'}</td>
+      <td>${t}</td><td title="${r.project}">${base(r.project)}</td><td>${shortId(r.session_id)}</td>
+      <td>${r.model || '-'}</td>
       <td class="num">${fmt(r.input_tokens)}</td><td class="num">${fmt(r.output_tokens)}</td>
       <td class="num">${r.cost_usd ? money(r.cost_usd) : '-'}</td>
-      <td class="num">${fmt(r.latency_ms)}</td><td class="num">${r.status}</td><td>${r.path}</td>
     </tr>`;
   }).join('');
 }
 
-function drawChart(series) {
-  const cv = document.getElementById('chart');
+function drawSpend(series) {
+  const cv = document.getElementById('spendChart');
   const dpr = window.devicePixelRatio || 1;
   const w = cv.clientWidth, h = cv.clientHeight;
   cv.width = w * dpr; cv.height = h * dpr;
@@ -121,38 +156,46 @@ function drawChart(series) {
   ctx.scale(dpr, dpr);
   ctx.clearRect(0, 0, w, h);
   if (!series.length) return;
+  let cum = 0; const pts = series.map(p => (cum += (p.cost || 0)));
   const pad = 8;
-  const max = Math.max(1, ...series.map(p => Math.max(p.input, p.output)));
-  const n = series.length;
+  const max = Math.max(1e-9, ...pts);
+  const n = pts.length;
   const x = (i) => pad + (n === 1 ? 0 : (i / (n - 1)) * (w - 2 * pad));
   const y = (v) => h - pad - (v / max) * (h - 2 * pad);
-  const plot = (key, color) => {
-    ctx.beginPath();
-    series.forEach((p, i) => { const px = x(i), py = y(p[key]); i ? ctx.lineTo(px, py) : ctx.moveTo(px, py); });
-    ctx.strokeStyle = color; ctx.lineWidth = 1.5; ctx.stroke();
-  };
-  plot('input', '#6aa6ff');
-  plot('output', '#5ad19a');
+  ctx.beginPath();
+  ctx.moveTo(x(0), y(0));
+  pts.forEach((v, i) => ctx.lineTo(x(i), y(v)));
+  ctx.lineTo(x(n - 1), h - pad); ctx.lineTo(x(0), h - pad); ctx.closePath();
+  ctx.fillStyle = 'rgba(90,209,154,0.10)'; ctx.fill();
+  ctx.beginPath();
+  pts.forEach((v, i) => { const px = x(i), py = y(v); i ? ctx.lineTo(px, py) : ctx.moveTo(px, py); });
+  ctx.strokeStyle = '#5ad19a'; ctx.lineWidth = 1.5; ctx.stroke();
 }
 
 async function tick() {
   try {
-    const r = await fetch('/api/usage');
+    const r = await fetch('/api/usage?scope=' + scope);
     const d = await r.json();
-    document.getElementById('session').textContent = d.session || '—';
+    document.getElementById('src').textContent = scope === 'project' && d.project ? base(d.project) : '~/.claude transcripts';
+    document.getElementById('updated').textContent = 'updated ' + new Date().toLocaleTimeString();
     document.getElementById('c-spend').textContent = money(d.cost_usd);
-    document.getElementById('c-req').textContent = fmt(d.requests);
+    document.getElementById('c-save').textContent = money(d.cache_savings_usd);
+    document.getElementById('c-hit').textContent = (d.hit_rate || 0).toFixed(1) + '% hit rate';
+    document.getElementById('c-sess').textContent = fmt(d.sessions);
+    document.getElementById('c-turns').textContent = fmt(d.turns) + ' turns';
     document.getElementById('c-in').textContent = fmt(d.input_tokens);
     document.getElementById('c-out').textContent = fmt(d.output_tokens);
-    document.getElementById('c-cache').textContent = fmt(d.cache_read_tokens);
-    renderModels(d.by_model || []);
+    renderBars('sessions', d.by_session || [], (r) => `${shortId(r.key)} <small>· ${base(r.project)} · ${r.model || ''}</small>`);
+    renderBars('projects', d.by_project || [], (r) => base(r.key));
+    renderBars('models', d.by_model || [], (r) => r.key);
     renderRows(d.recent || []);
-    drawChart(d.series || []);
-  } catch (e) { /* proxy/dashboard may be momentarily unavailable */ }
+    drawSpend(d.series || []);
+  } catch (e) { /* dashboard may be momentarily unavailable */ }
 }
 tick();
-setInterval(tick, 1000);
+setInterval(tick, 2000);
 window.addEventListener('resize', tick);
+window.addEventListener('keydown', (e) => { if (e.key === 'r' || e.key === 'R') tick(); });
 </script>
 </body>
 </html>

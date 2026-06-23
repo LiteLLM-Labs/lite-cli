@@ -32,6 +32,8 @@ pub struct RequestRecord {
     #[serde(default)]
     pub cost_usd: f64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub session_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub request_body: Option<serde_json::Value>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub response_body: Option<serde_json::Value>,
@@ -60,6 +62,7 @@ impl RequestRecord {
             cache_read_tokens: usage.cache_read_tokens,
             cache_creation_tokens: usage.cache_creation_tokens,
             cost_usd: 0.0,
+            session_id: None,
             request_body: None,
             response_body: None,
         }
