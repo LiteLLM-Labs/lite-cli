@@ -138,7 +138,7 @@ async fn proxy(state: Arc<ProxyState>, req: axum::extract::Request) -> Result<Re
             if logger.log_bodies {
                 rec.request_body = request_json;
             }
-            logger.log(&rec);
+            logger.log(rec);
         });
 
         let body_stream = futures_util::stream::unfold(rx, |mut rx| async move {
@@ -162,7 +162,7 @@ async fn proxy(state: Arc<ProxyState>, req: axum::extract::Request) -> Result<Re
             rec.request_body = request_json;
             rec.response_body = serde_json::from_slice(&resp_bytes).ok();
         }
-        state.logger.log(&rec);
+        state.logger.log(rec);
         Ok(builder.body(Body::from(resp_bytes))?)
     }
 }

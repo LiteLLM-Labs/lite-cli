@@ -14,9 +14,11 @@ use serde::Serialize;
 
 use crate::log::RequestRecord;
 use crate::logs_cmd::latest_session;
+use crate::pricing::Pricing;
 
 struct DashState {
     log_dir: PathBuf,
+    pricing: Pricing,
 }
 
 #[derive(Serialize, Default)]
@@ -25,6 +27,7 @@ struct ModelRow {
     requests: u64,
     input_tokens: u64,
     output_tokens: u64,
+    cost_usd: f64,
 }
 
 #[derive(Serialize, Default)]
@@ -42,13 +45,15 @@ struct UsageResponse {
     output_tokens: u64,
     cache_read_tokens: u64,
     cache_creation_tokens: u64,
+    cost_usd: f64,
     by_model: Vec<ModelRow>,
     recent: Vec<RequestRecord>,
     series: Vec<SeriesPoint>,
 }
 
 pub async fn serve(port: u16, log_dir: PathBuf) -> Result<()> {
-    let state = Arc::new(DashState { log_dir });
+    let pricing = Pricing::load().await;
+    let state = Arc::new(DashState { log_dir, pricing });
     let app = axum::Router::new()
         .route("/", get(root))
         .route("/api/usage", get(api_usage))
@@ -91,14 +96,25 @@ async fn api_usage(
     let mut by_model: BTreeMap<String, ModelRow> = BTreeMap::new();
     let mut records: Vec<RequestRecord> = Vec::new();
     for (i, line) in content.lines().enumerate() {
-        let Ok(rec) = serde_json::from_str::<RequestRecord>(line) else {
+        let Ok(mut rec) = serde_json::from_str::<RequestRecord>(line) else {
             continue;
         };
+        // Recompute cost if the record predates spend tracking (keeps prices current too).
+        if rec.cost_usd == 0.0 {
+            rec.cost_usd = state.pricing.cost(
+                rec.model.as_deref(),
+                rec.input_tokens,
+                rec.output_tokens,
+                rec.cache_read_tokens,
+                rec.cache_creation_tokens,
+            );
+        }
         resp.requests += 1;
         resp.input_tokens += rec.input_tokens;
         resp.output_tokens += rec.output_tokens;
         resp.cache_read_tokens += rec.cache_read_tokens;
         resp.cache_creation_tokens += rec.cache_creation_tokens;
+        resp.cost_usd += rec.cost_usd;
 
         let key = rec.model.clone().unwrap_or_else(|| "unknown".to_string());
         let row = by_model.entry(key.clone()).or_insert_with(|| ModelRow {
@@ -108,6 +124,7 @@ async fn api_usage(
         row.requests += 1;
         row.input_tokens += rec.input_tokens;
         row.output_tokens += rec.output_tokens;
+        row.cost_usd += rec.cost_usd;
 
         resp.series.push(SeriesPoint {
             i,
@@ -118,7 +135,8 @@ async fn api_usage(
     }
 
     resp.by_model = by_model.into_values().collect();
-    resp.by_model.sort_by(|a, b| b.input_tokens.cmp(&a.input_tokens));
+    resp.by_model
+        .sort_by(|a, b| b.cost_usd.partial_cmp(&a.cost_usd).unwrap_or(std::cmp::Ordering::Equal));
     // Most recent first, capped.
     records.reverse();
     records.truncate(100);

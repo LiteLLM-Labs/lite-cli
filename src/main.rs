@@ -1,6 +1,7 @@
 mod dashboard;
 mod log;
 mod logs_cmd;
+mod pricing;
 mod proxy;
 mod usage;
 
@@ -117,7 +118,8 @@ async fn run_claude(args: ClaudeArgs) -> Result<()> {
 
     let log_dir = args.log_dir.unwrap_or_else(default_log_dir);
     let session_ts = chrono::Utc::now().format("%Y%m%dT%H%M%S%3fZ").to_string();
-    let logger = Arc::new(Logger::new(&log_dir, &session_ts, args.bodies)?);
+    let pricing = pricing::Pricing::load().await;
+    let logger = Arc::new(Logger::new(&log_dir, &session_ts, args.bodies, pricing)?);
 
     // Bind proxy listener (ephemeral unless --port given).
     let bind_port = args.port.unwrap_or(0);
@@ -188,12 +190,13 @@ fn print_summary(logger: &Logger) {
     eprintln!("  requests:      {}", s.requests);
     eprintln!("  input tokens:  {}", s.input_tokens);
     eprintln!("  output tokens: {}", s.output_tokens);
+    eprintln!("  spend:         ${:.4}", s.cost_usd);
     if !s.by_model.is_empty() {
         eprintln!("  by model:");
         for (model, t) in &s.by_model {
             eprintln!(
-                "    {model}: {} req, {} in, {} out",
-                t.requests, t.input_tokens, t.output_tokens
+                "    {model}: {} req, {} in, {} out, ${:.4}",
+                t.requests, t.input_tokens, t.output_tokens, t.cost_usd
             );
         }
     }

@@ -52,6 +52,17 @@ lite logs --follow               # live tail
 | `--bodies` | off | log full request + response bodies |
 | `--dashboard` | off | also start the web dashboard + open browser |
 
+## Spend tracking
+
+Per-request USD cost is computed from LiteLLM's
+[`model_prices_and_context_window.json`](https://github.com/BerriAI/litellm/blob/litellm_internal_staging/model_prices_and_context_window.json)
+(fetched once, cached to `~/.lite/model_prices.json`, refreshed every 24h). The math is a faithful
+port of litellm's `generic_cost_per_token` token path — including separate input / output /
+cache-read / cache-write rates and long-context (`_above_Nk_tokens`) tiered pricing, where the
+threshold is the **total** context (input + cache read + cache write). Verified to match litellm's
+function exactly. Spend shows in the session summary, the `lite logs` table, and the dashboard
+SPEND card.
+
 ## Where logs live
 
 `~/.lite/logs/session-<timestamp>.jsonl` — one JSON object per API call (model, input/output

@@ -22,13 +22,15 @@
   .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 8px var(--accent); }
   .session { color: var(--muted); font-size: 12px; margin-left: auto; }
   main { padding: 24px; max-width: 1100px; margin: 0 auto; }
-  .cards { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-bottom: 24px; }
+  .cards { display: grid; grid-template-columns: repeat(5, 1fr); gap: 14px; margin-bottom: 24px; }
+  .card.spend { border-color: var(--accent); }
+  .card.spend .value { color: var(--accent); }
   .card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 16px; }
   .card .label { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .8px; }
   .card .value { font-size: 28px; font-weight: 600; margin-top: 6px; }
   section { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 18px; margin-bottom: 20px; }
   section h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .8px; color: var(--muted); margin: 0 0 14px; }
-  .bar-row { display: grid; grid-template-columns: 220px 1fr 90px; align-items: center; gap: 10px; margin-bottom: 8px; }
+  .bar-row { display: grid; grid-template-columns: 220px 1fr 200px; align-items: center; gap: 10px; margin-bottom: 8px; }
   .bar-track { background: #0b0d10; border-radius: 6px; height: 18px; overflow: hidden; }
   .bar-fill { background: linear-gradient(90deg, var(--accent2), var(--accent)); height: 100%; }
   .bar-row .name { color: var(--fg); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -49,6 +51,7 @@
   </header>
   <main>
     <div class="cards">
+      <div class="card spend"><div class="label">Spend</div><div class="value" id="c-spend">$0.00</div></div>
       <div class="card"><div class="label">Requests</div><div class="value" id="c-req">0</div></div>
       <div class="card"><div class="label">Input tokens</div><div class="value" id="c-in">0</div></div>
       <div class="card"><div class="label">Output tokens</div><div class="value" id="c-out">0</div></div>
@@ -70,7 +73,7 @@
       <table>
         <thead><tr>
           <th>time</th><th>model</th><th class="num">in</th><th class="num">out</th>
-          <th class="num">ms</th><th class="num">code</th><th>path</th>
+          <th class="num">cost</th><th class="num">ms</th><th class="num">code</th><th>path</th>
         </tr></thead>
         <tbody id="rows"><tr><td colspan="7" class="empty">No requests yet…</td></tr></tbody>
       </table>
@@ -79,30 +82,31 @@
 
 <script>
 const fmt = (n) => (n ?? 0).toLocaleString();
+const money = (n) => '$' + (n ?? 0).toLocaleString(undefined, { minimumFractionDigits: (n && n < 1 ? 4 : 2), maximumFractionDigits: 4 });
 
 function renderModels(by) {
   const el = document.getElementById('models');
   if (!by.length) { el.innerHTML = '<div class="empty">No data yet…</div>'; return; }
-  const max = Math.max(1, ...by.map(m => m.input_tokens + m.output_tokens));
+  const max = Math.max(1, ...by.map(m => m.cost_usd || 0));
   el.innerHTML = by.map(m => {
-    const total = m.input_tokens + m.output_tokens;
-    const pct = (total / max * 100).toFixed(1);
+    const pct = ((m.cost_usd || 0) / max * 100).toFixed(1);
     return `<div class="bar-row">
       <div class="name" title="${m.model}">${m.model}</div>
       <div class="bar-track"><div class="bar-fill" style="width:${pct}%"></div></div>
-      <div class="num">${fmt(total)}</div>
+      <div class="num">${money(m.cost_usd)} · ${fmt(m.input_tokens + m.output_tokens)} tok</div>
     </div>`;
   }).join('');
 }
 
 function renderRows(recent) {
   const el = document.getElementById('rows');
-  if (!recent.length) { el.innerHTML = '<tr><td colspan="7" class="empty">No requests yet…</td></tr>'; return; }
+  if (!recent.length) { el.innerHTML = '<tr><td colspan="8" class="empty">No requests yet…</td></tr>'; return; }
   el.innerHTML = recent.map(r => {
     const t = (r.ts.split('T')[1] || r.ts).replace('Z','');
     return `<tr>
       <td>${t}</td><td>${r.model ?? '-'}</td>
       <td class="num">${fmt(r.input_tokens)}</td><td class="num">${fmt(r.output_tokens)}</td>
+      <td class="num">${r.cost_usd ? money(r.cost_usd) : '-'}</td>
       <td class="num">${fmt(r.latency_ms)}</td><td class="num">${r.status}</td><td>${r.path}</td>
     </tr>`;
   }).join('');
@@ -136,6 +140,7 @@ async function tick() {
     const r = await fetch('/api/usage');
     const d = await r.json();
     document.getElementById('session').textContent = d.session || '—';
+    document.getElementById('c-spend').textContent = money(d.cost_usd);
     document.getElementById('c-req').textContent = fmt(d.requests);
     document.getElementById('c-in').textContent = fmt(d.input_tokens);
     document.getElementById('c-out').textContent = fmt(d.output_tokens);

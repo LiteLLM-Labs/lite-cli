@@ -64,8 +64,8 @@ pub async fn run(log_dir: PathBuf, session: Option<PathBuf>, follow: bool) -> Re
 
 fn print_header() {
     println!(
-        "{:<12}  {:<28}  {:>7}  {:>7}  {:>7}  {:>4}  {}",
-        "time", "model", "in", "out", "ms", "code", "path"
+        "{:<12}  {:<28}  {:>7}  {:>7}  {:>9}  {:>7}  {:>4}  {}",
+        "time", "model", "in", "out", "cost", "ms", "code", "path"
     );
 }
 
@@ -73,8 +73,13 @@ fn print_row(r: &RequestRecord) {
     let time = r.ts.split('T').nth(1).unwrap_or(&r.ts);
     let time = time.trim_end_matches('Z');
     let model = r.model.as_deref().unwrap_or("-");
+    let cost = if r.cost_usd > 0.0 {
+        format!("${:.4}", r.cost_usd)
+    } else {
+        "-".to_string()
+    };
     println!(
-        "{:<12}  {:<28}  {:>7}  {:>7}  {:>7}  {:>4}  {}",
-        time, model, r.input_tokens, r.output_tokens, r.latency_ms, r.status, r.path
+        "{:<12}  {:<28}  {:>7}  {:>7}  {:>9}  {:>7}  {:>4}  {}",
+        time, model, r.input_tokens, r.output_tokens, cost, r.latency_ms, r.status, r.path
     );
 }
