@@ -48,14 +48,29 @@ struct RecentTurn {
 }
 
 #[derive(Serialize, Default)]
-struct SeriesPoint {
-    i: usize,
-    cost: f64,
+struct ModelCost {
+    key: String,
+    turns: u64,
+    input_tokens: u64,
+    output_tokens: u64,
+    cost_usd: f64,
+}
+
+#[derive(Serialize, Default)]
+struct DayRow {
+    key: String,
+    turns: u64,
+    input_tokens: u64,
+    output_tokens: u64,
+    cost_usd: f64,
+    /// Per-model spend for this day, sorted by cost desc. Drives the stacked bar + tooltip.
+    models: Vec<ModelCost>,
 }
 
 #[derive(Serialize, Default)]
 struct UsageResponse {
     scope: String,
+    range: String,
     project: String,
     turns: u64,
     sessions: u64,
@@ -64,14 +79,17 @@ struct UsageResponse {
     cache_read_tokens: u64,
     cache_creation_tokens: u64,
     cost_usd: f64,
+    cost_input: f64,
+    cost_output: f64,
+    cost_cache_read: f64,
+    cost_cache_write: f64,
     cache_savings_usd: f64,
     hit_rate: f64,
     by_session: Vec<GroupRow>,
     by_project: Vec<GroupRow>,
     by_model: Vec<GroupRow>,
-    by_day: Vec<GroupRow>,
+    by_day: Vec<DayRow>,
     recent: Vec<RecentTurn>,
-    series: Vec<SeriesPoint>,
 }
 
 pub async fn serve(port: u16, _log_dir: std::path::PathBuf) -> Result<()> {
@@ -86,6 +104,7 @@ pub async fn serve(port: u16, _log_dir: std::path::PathBuf) -> Result<()> {
     let app = axum::Router::new()
         .route("/", get(root))
         .route("/api/usage", get(api_usage))
+        .route("/api/rtk", get(api_rtk))
         .with_state(state);
     let listener = tokio::net::TcpListener::bind(("127.0.0.1", port))
         .await
@@ -97,6 +116,28 @@ pub async fn serve(port: u16, _log_dir: std::path::PathBuf) -> Result<()> {
 
 async fn root() -> Html<&'static str> {
     Html(include_str!("dashboard.html"))
+}
+
+/// rtk's own savings stats (the only source with pre/post token counts), via
+/// `rtk gain --all --format json`. Returns `{available:false}` if rtk isn't installed / has no data.
+async fn api_rtk() -> Json<serde_json::Value> {
+    let out = std::process::Command::new("rtk")
+        .args(["gain", "--all", "--format", "json"])
+        .output();
+    match out {
+        Ok(o) if o.status.success() => {
+            match serde_json::from_slice::<serde_json::Value>(&o.stdout) {
+                Ok(mut v) => {
+                    if let Some(obj) = v.as_object_mut() {
+                        obj.insert("available".into(), serde_json::Value::Bool(true));
+                    }
+                    Json(v)
+                }
+                Err(_) => Json(serde_json::json!({ "available": false })),
+            }
+        }
+        _ => Json(serde_json::json!({ "available": false })),
+    }
 }
 
 async fn api_usage(
@@ -118,16 +159,25 @@ async fn api_usage(
     };
     resp.project = project_filter.clone().unwrap_or_default();
 
-    let turns = transcripts::read_all(project_filter.as_deref());
+    // Time range: today / 7d / 30d / all (rolling, UTC). Filter turns by their ISO timestamp.
+    let range = params.get("range").map(|s| s.as_str()).unwrap_or("30d");
+    resp.range = range.to_string();
+    let cutoff = range_cutoff(range);
+    let turns: Vec<Turn> = transcripts::read_all(project_filter.as_deref())
+        .into_iter()
+        .filter(|t| cutoff.as_deref().map(|c| t.ts.as_str() >= c).unwrap_or(true))
+        .collect();
 
     let mut by_session: BTreeMap<String, GroupRow> = BTreeMap::new();
     let mut by_project: BTreeMap<String, GroupRow> = BTreeMap::new();
     let mut by_model: BTreeMap<String, GroupRow> = BTreeMap::new();
-    let mut by_day: BTreeMap<String, GroupRow> = BTreeMap::new();
+    let mut by_day: BTreeMap<String, DayRow> = BTreeMap::new();
+    // day -> model -> cost; built alongside by_day so each day can carry its model breakdown.
+    let mut by_day_model: BTreeMap<String, BTreeMap<String, ModelCost>> = BTreeMap::new();
     let mut recent: Vec<RecentTurn> = Vec::new();
 
     for t in &turns {
-        let cost = state.pricing.cost_detailed(
+        let bd = state.pricing.cost_breakdown(
             t.model.as_deref(),
             t.input_tokens,
             t.output_tokens,
@@ -136,6 +186,7 @@ async fn api_usage(
             t.cache_creation_1h,
             t.service_tier.as_deref(),
         );
+        let cost = bd.total();
         let model = t.model.clone().unwrap_or_else(|| "unknown".to_string());
 
         resp.turns += 1;
@@ -144,6 +195,10 @@ async fn api_usage(
         resp.cache_read_tokens += t.cache_read_tokens;
         resp.cache_creation_tokens += t.cache_creation_total();
         resp.cost_usd += cost;
+        resp.cost_input += bd.input;
+        resp.cost_output += bd.output;
+        resp.cost_cache_read += bd.cache_read;
+        resp.cost_cache_write += bd.cache_write;
         resp.cache_savings_usd += state
             .pricing
             .cache_savings(t.model.as_deref(), t.cache_read_tokens);
@@ -163,13 +218,22 @@ async fn api_usage(
         // Day bucket from the ISO timestamp (YYYY-MM-DD).
         let day = t.ts.get(..10).unwrap_or("").to_string();
         let drow = by_day.entry(day.clone()).or_default();
-        accumulate(drow, t, &model, cost);
-        drow.key = day;
+        drow.key = day.clone();
+        drow.turns += 1;
+        drow.input_tokens += t.input_tokens;
+        drow.output_tokens += t.output_tokens;
+        drow.cost_usd += cost;
+        let mc = by_day_model
+            .entry(day)
+            .or_default()
+            .entry(model.clone())
+            .or_default();
+        mc.key = model.clone();
+        mc.turns += 1;
+        mc.input_tokens += t.input_tokens;
+        mc.output_tokens += t.output_tokens;
+        mc.cost_usd += cost;
 
-        resp.series.push(SeriesPoint {
-            i: resp.turns as usize,
-            cost,
-        });
         recent.push(RecentTurn {
             ts: t.ts.clone(),
             project: t.project.clone(),
@@ -190,12 +254,47 @@ async fn api_usage(
     resp.by_session = sorted_by_cost(by_session);
     resp.by_project = sorted_by_cost(by_project);
     resp.by_model = sorted_by_cost(by_model);
-    // Days stay chronological for a time-series chart.
-    resp.by_day = by_day.into_values().collect();
+    // Days stay chronological for a time-series chart; attach each day's model breakdown.
+    resp.by_day = by_day
+        .into_values()
+        .map(|mut d| {
+            let mut models: Vec<ModelCost> = by_day_model
+                .remove(&d.key)
+                .map(|m| m.into_values().collect())
+                .unwrap_or_default();
+            models.sort_by(|a, b| {
+                b.cost_usd
+                    .partial_cmp(&a.cost_usd)
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            });
+            d.models = models;
+            d
+        })
+        .collect();
     recent.reverse();
     recent.truncate(100);
     resp.recent = recent;
     Json(resp)
+}
+
+/// RFC3339 (UTC) cutoff for a range keyword, or None for "all". Transcript timestamps are
+/// RFC3339 UTC and sort lexicographically, so a string compare is a valid time filter.
+/// "today" is the user's *local* calendar day (converted to UTC for the comparison).
+fn range_cutoff(range: &str) -> Option<String> {
+    use chrono::TimeZone;
+    let start = match range {
+        "today" => {
+            let local_midnight = chrono::Local::now().date_naive().and_hms_opt(0, 0, 0)?;
+            chrono::Local
+                .from_local_datetime(&local_midnight)
+                .single()?
+                .with_timezone(&chrono::Utc)
+        }
+        "7d" => chrono::Utc::now() - chrono::Duration::days(7),
+        "30d" => chrono::Utc::now() - chrono::Duration::days(30),
+        _ => return None, // "all"
+    };
+    Some(start.to_rfc3339_opts(chrono::SecondsFormat::Millis, true))
 }
 
 fn accumulate(row: &mut GroupRow, t: &Turn, model: &str, cost: f64) {

@@ -27,6 +27,21 @@ const CACHE_CREATION_KEY: &str = "cache_creation_input_token_cost";
 /// Per-model cost fields (base + any `_above_<N>_tokens` tier variants), as f64 USD/token.
 type CostMap = HashMap<String, f64>;
 
+/// USD cost of one request split by component.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct CostBreakdown {
+    pub input: f64,
+    pub output: f64,
+    pub cache_read: f64,
+    pub cache_write: f64,
+}
+
+impl CostBreakdown {
+    pub fn total(&self) -> f64 {
+        self.input + self.output + self.cache_read + self.cache_write
+    }
+}
+
 #[derive(Default)]
 pub struct Pricing {
     map: HashMap<String, CostMap>,
@@ -146,9 +161,10 @@ impl Pricing {
             + cache_creation_tokens as f64 * rate(CACHE_CREATION_KEY)
     }
 
-    /// Like `cost`, but using the richer transcript data: service tier and the 5m/1h
-    /// cache-creation split (litellm bills 5m at the base write rate, 1h at `_above_1hr`).
-    pub fn cost_detailed(
+    /// Per-component USD breakdown of a request — the basis for "what's driving spend".
+    /// Uses the richer transcript data: service tier and the 5m/1h cache-creation split
+    /// (litellm bills 5m at the base write rate, 1h at `_above_1hr`).
+    pub fn cost_breakdown(
         &self,
         model: Option<&str>,
         input_tokens: u64,
@@ -157,18 +173,19 @@ impl Pricing {
         cache_creation_5m: u64,
         cache_creation_1h: u64,
         service_tier: Option<&str>,
-    ) -> f64 {
+    ) -> CostBreakdown {
         let Some(costs) = model.and_then(|m| self.lookup(m)) else {
-            return 0.0;
+            return CostBreakdown::default();
         };
         let total = input_tokens + cache_read_tokens + cache_creation_5m + cache_creation_1h;
         let rate = self.rate_resolver(costs, total, service_tier);
-
-        input_tokens as f64 * rate(INPUT_KEY)
-            + output_tokens as f64 * rate(OUTPUT_KEY)
-            + cache_read_tokens as f64 * rate(CACHE_READ_KEY)
-            + cache_creation_5m as f64 * rate(CACHE_CREATION_KEY)
-            + cache_creation_1h as f64 * rate("cache_creation_input_token_cost_above_1hr")
+        CostBreakdown {
+            input: input_tokens as f64 * rate(INPUT_KEY),
+            output: output_tokens as f64 * rate(OUTPUT_KEY),
+            cache_read: cache_read_tokens as f64 * rate(CACHE_READ_KEY),
+            cache_write: cache_creation_5m as f64 * rate(CACHE_CREATION_KEY)
+                + cache_creation_1h as f64 * rate("cache_creation_input_token_cost_above_1hr"),
+        }
     }
 
     /// Build a rate lookup for a request: resolves base keys against the matching long-context

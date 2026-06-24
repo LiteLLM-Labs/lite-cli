@@ -28,7 +28,10 @@
   .toggle button.active { background: var(--accent2); color: #06121f; }
   .src { color: var(--muted); font-size: 12px; margin-left: auto; }
   .updated { color: var(--muted); font-size: 11px; }
-  main { padding: 24px; max-width: 1100px; margin: 0 auto; }
+  main { padding: 24px 32px; }
+  .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; align-items: start; }
+  .two-col > section { margin-bottom: 0; }
+  @media (max-width: 900px) { .two-col { grid-template-columns: 1fr; } }
   .cards { display: grid; grid-template-columns: repeat(5, 1fr); gap: 14px; margin-bottom: 20px; }
   .card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 16px; }
   .card.spend { border-color: var(--accent); }
@@ -50,14 +53,71 @@
   th { color: var(--muted); font-weight: 500; font-size: 11px; text-transform: uppercase; }
   td.num, th.num { text-align: right; }
   canvas { width: 100%; height: 200px; display: block; }
+  #dayChart { height: 280px; cursor: crosshair; }
   .empty { color: var(--muted); padding: 20px 0; }
+  /* daily stacked-bar chart */
+  .chart-wrap { position: relative; }
+  .chart-tip {
+    position: absolute; pointer-events: none; display: none; z-index: 10; min-width: 170px;
+    background: #0b0d10; border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px;
+    font-size: 12px; box-shadow: 0 6px 20px rgba(0,0,0,.5);
+  }
+  .chart-tip .tip-date { color: var(--fg); font-weight: 600; margin-bottom: 8px; }
+  .chart-tip .tip-row { display: flex; justify-content: space-between; gap: 14px; margin: 2px 0; }
+  .chart-tip .tip-row .lbl { display: flex; align-items: center; gap: 7px; color: var(--muted); }
+  .chart-tip .tip-row .num { color: var(--fg); }
+  .chart-tip .sw { width: 9px; height: 9px; border-radius: 2px; flex: none; }
+  .chart-tip .tip-total {
+    display: flex; justify-content: space-between; gap: 14px; margin-top: 8px;
+    padding-top: 8px; border-top: 1px solid var(--line); color: var(--fg); font-weight: 600;
+  }
+  .day-legend { display: flex; flex-wrap: wrap; gap: 16px; margin-top: 14px; }
+  .day-legend .item { display: flex; align-items: center; gap: 7px; font-size: 12px; color: var(--muted); }
+  .day-legend .sw { width: 10px; height: 10px; border-radius: 2px; }
+  /* driver panel */
+  .driver { border-color: var(--warn); }
+  .driver .lead { font-size: 16px; margin-bottom: 4px; }
+  .driver .lead b { color: var(--warn); }
+  .driver .cause { color: var(--muted); margin-bottom: 12px; }
+  .driver .fixes { margin: 0; padding-left: 18px; }
+  .driver .fixes li { margin: 3px 0; }
+  /* tabs / views */
+  .tabs { margin-left: 16px; }
+  .view { display: none; }
+  .view.active { display: block; }
+  .note { color: var(--muted); font-size: 13px; margin: 0 0 14px; }
+  .note code { color: var(--fg); background: #0b0d10; padding: 1px 5px; border-radius: 4px; }
+  /* tool cards */
+  .tool-cards { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+  .tool-card { border: 1px solid var(--line); border-radius: 10px; padding: 14px; background: #0e1217; }
+  .tool-name { font-size: 15px; font-weight: 600; margin-bottom: 6px; }
+  .tool-what { color: var(--muted); font-size: 13px; margin-bottom: 10px; }
+  .tool-link { color: var(--accent2); text-decoration: none; font-size: 12px; }
+  .badge { font-size: 10px; text-transform: uppercase; letter-spacing: .5px; color: #06121f;
+    background: var(--accent); padding: 2px 6px; border-radius: 4px; margin-left: 6px; }
+  pre.cmd, pre.prompt { background: #0b0d10; border: 1px solid var(--line); border-radius: 6px;
+    padding: 12px; overflow-x: auto; font-size: 12px; color: var(--fg); white-space: pre-wrap; }
+  .copy-btn { float: right; background: var(--accent2); color: #06121f; border: 0; border-radius: 6px;
+    padding: 5px 12px; font: inherit; font-size: 12px; cursor: pointer; }
+  .rec-line b { color: var(--warn); }
+  .rec-line { margin-bottom: 10px; }
 </style>
 </head>
 <body>
   <header>
     <span class="dot"></span>
-    <h1>lite · spend</h1>
-    <div class="toggle">
+    <h1>lite</h1>
+    <div class="toggle tabs">
+      <button id="v-spend" class="active" onclick="setView('spend')">Spend</button>
+      <button id="v-tools" onclick="setView('tools')">Tools</button>
+    </div>
+    <div class="toggle" id="range-toggle">
+      <button id="r-today" onclick="setRange('today')">Today</button>
+      <button id="r-7d" onclick="setRange('7d')">7d</button>
+      <button id="r-30d" class="active" onclick="setRange('30d')">30d</button>
+      <button id="r-all" onclick="setRange('all')">All</button>
+    </div>
+    <div class="toggle" id="proj-toggle">
       <button id="t-all" class="active" onclick="setScope('all')">All projects</button>
       <button id="t-project" onclick="setScope('project')">This project</button>
     </div>
@@ -65,6 +125,7 @@
     <span class="updated" id="updated"></span>
   </header>
   <main>
+  <div id="view-spend" class="view">
     <div class="cards">
       <div class="card spend"><div class="label">Total spend</div><div class="value" id="c-spend">$0.00</div></div>
       <div class="card save"><div class="label">Cache saved</div><div class="value" id="c-save">$0.00</div><div class="sub" id="c-hit">0% hit rate</div></div>
@@ -73,14 +134,25 @@
       <div class="card"><div class="label">Output tokens</div><div class="value" id="c-out">0</div></div>
     </div>
 
-    <section>
-      <h2>Spend over time (cumulative USD)</h2>
-      <canvas id="spendChart"></canvas>
-    </section>
+    <div class="two-col">
+      <section>
+        <h2>Spend by day <span id="day-meta" style="float:right;color:var(--muted);font-weight:400"></span></h2>
+        <div class="chart-wrap">
+          <canvas id="dayChart"></canvas>
+          <div class="chart-tip" id="dayTip"></div>
+        </div>
+        <div class="day-legend" id="day-legend"></div>
+      </section>
 
-    <section>
-      <h2>Spend by day <span id="day-meta" style="float:right;color:var(--muted);font-weight:400"></span></h2>
-      <canvas id="dayChart"></canvas>
+      <section>
+        <h2>Spend by model</h2>
+        <div id="models"><div class="empty">No data yet…</div></div>
+      </section>
+    </div>
+
+    <section id="driver-section" class="driver">
+      <h2>What's driving your spend</h2>
+      <div id="driver"><div class="empty">No data yet…</div></div>
     </section>
 
     <section>
@@ -94,11 +166,6 @@
     </section>
 
     <section>
-      <h2>Spend by model</h2>
-      <div id="models"><div class="empty">No data yet…</div></div>
-    </section>
-
-    <section>
       <h2>Recent turns</h2>
       <table>
         <thead><tr>
@@ -108,10 +175,57 @@
         <tbody id="rows"><tr><td colspan="7" class="empty">No turns yet…</td></tr></tbody>
       </table>
     </section>
+  </div><!-- /view-spend -->
+
+  <div id="view-tools" class="view">
+    <section id="tool-rec" class="driver">
+      <h2>Recommended for your spend</h2>
+      <div id="tool-rec-body"><div class="empty">No data yet…</div></div>
+    </section>
+
+    <section>
+      <h2>rtk savings <span id="rtk-meta" style="float:right;color:var(--muted);font-weight:400"></span></h2>
+      <div id="rtk-body"><div class="empty">Checking rtk…</div></div>
+    </section>
+
+    <section>
+      <h2>Prompt / context compression</h2>
+      <p class="note">lite only observes — it doesn't change your traffic. To actually cut tokens,
+        route Claude Code through one of these (open-source, run locally):</p>
+      <div class="tool-cards">
+        <div class="tool-card">
+          <div class="tool-name">Headroom <span id="hr-badge"></span></div>
+          <div class="tool-what">Context-compression proxy. Compresses tool outputs, files, logs, and
+            conversation history before they reach the model — directly shrinks the cache-read /
+            input tokens that dominate most Claude Code bills.</div>
+          <pre class="cmd">pip install "headroom-ai[all]"
+headroom wrap claude</pre>
+          <a class="tool-link" href="https://github.com/headroomlabs-ai/headroom" target="_blank">github.com/headroomlabs-ai/headroom →</a>
+        </div>
+        <div class="tool-card">
+          <div class="tool-name">rtk</div>
+          <div class="tool-what">Rewrites and trims verbose shell &amp; tool output (bundled by
+            Headroom) so noisy command results stop bloating context and getting re-cached every turn.</div>
+          <pre class="cmd"># bundled with Headroom's proxy</pre>
+          <a class="tool-link" href="https://github.com/headroomlabs-ai/headroom" target="_blank">part of Headroom →</a>
+        </div>
+      </div>
+    </section>
+
+    <section>
+      <h2>Guidance for Claude (paste into CLAUDE.md or save as a skill)</h2>
+      <p class="note">Generated from your dominant cost driver. Drop it in <code>~/.claude/CLAUDE.md</code>
+        (global) or a project <code>CLAUDE.md</code> so future sessions follow it.</p>
+      <button class="copy-btn" id="copy-prompt" onclick="copyPrompt()">Copy</button>
+      <pre class="prompt" id="prompt-block">…</pre>
+    </section>
+  </div><!-- /view-tools -->
   </main>
 
 <script>
 let scope = 'all';
+let range = '30d';
+const RANGE_LABEL = { today: 'today', '7d': 'last 7 days', '30d': 'last 30 days', all: 'all time' };
 const fmt = (n) => (n ?? 0).toLocaleString();
 const money = (n) => '$' + (n ?? 0).toLocaleString(undefined, { minimumFractionDigits: (n && n < 1 ? 4 : 2), maximumFractionDigits: 4 });
 const base = (p) => (p || '').split('/').filter(Boolean).pop() || p || '-';
@@ -122,6 +236,112 @@ function setScope(s) {
   document.getElementById('t-all').classList.toggle('active', s === 'all');
   document.getElementById('t-project').classList.toggle('active', s === 'project');
   tick();
+}
+
+function setRange(r) {
+  range = r;
+  ['today', '7d', '30d', 'all'].forEach(k =>
+    document.getElementById('r-' + k).classList.toggle('active', k === r));
+  tick();
+}
+
+function setView(v) {
+  document.getElementById('view-spend').classList.toggle('active', v === 'spend');
+  document.getElementById('view-tools').classList.toggle('active', v === 'tools');
+  document.getElementById('v-spend').classList.toggle('active', v === 'spend');
+  document.getElementById('v-tools').classList.toggle('active', v === 'tools');
+  document.getElementById('proj-toggle').style.display = v === 'spend' ? '' : 'none';
+  document.getElementById('range-toggle').style.display = v === 'spend' ? '' : 'none';
+  if (v === 'tools') tickRtk();
+}
+
+function dominant(d) {
+  const parts = { cache_read: d.cost_cache_read, cache_write: d.cost_cache_write, output: d.cost_output, input: d.cost_input };
+  const top = Object.entries(parts).sort((a, b) => b[1] - a[1])[0] || ['cache_read', 0];
+  const total = d.cost_usd || 0;
+  return { key: top[0], val: top[1], total, pct: total ? Math.round(top[1] / total * 100) : 0 };
+}
+
+let lastPrompt = '';
+function renderTools(d) {
+  const { key, val, total, pct } = dominant(d);
+  const info = DRIVER[key] || DRIVER.cache_read;
+  // Recommendation callout.
+  const rec = document.getElementById('tool-rec-body');
+  if (total <= 0) {
+    rec.innerHTML = '<div class="empty">No data yet…</div>';
+  } else if (info.tools.length) {
+    rec.innerHTML = `<div class="rec-line"><b>${COMP[key].label} = ${pct}%</b> of your spend.
+      ${info.tools.map(t => t.name).join(' and ')} target this directly.</div>`;
+  } else {
+    rec.innerHTML = `<div class="rec-line"><b>${COMP[key].label} = ${pct}%</b> of your spend —
+      compression tools won't help much here. Lever: ${info.fixes[1] || info.fixes[0]}</div>`;
+  }
+  // Badge Headroom as recommended when it targets the driver.
+  const hrRec = info.tools.some(t => t.name === 'Headroom');
+  document.getElementById('hr-badge').innerHTML = hrRec ? '<span class="badge">recommended</span>' : '';
+  // Generated Claude prompt.
+  lastPrompt = buildPrompt(key, pct, val, total);
+  document.getElementById('prompt-block').textContent = lastPrompt;
+}
+
+// Rough $/token to value rtk's saved tokens (they'd re-enter context as input). Estimate only.
+const RTK_INPUT_RATE = 3e-6;
+async function tickRtk() {
+  let d;
+  try { d = await (await fetch('/api/rtk')).json(); } catch { return; }
+  const body = document.getElementById('rtk-body');
+  const meta = document.getElementById('rtk-meta');
+  if (!d || !d.available || !d.summary) {
+    meta.textContent = '';
+    body.innerHTML = `<div class="note">rtk not detected (or no data yet). Enable it for a session:
+      <code>lite claude --litellm_enable_rtk</code>, run some Bash commands, then refresh.</div>`;
+    return;
+  }
+  const s = d.summary;
+  const estUsd = (s.total_saved || 0) * RTK_INPUT_RATE;
+  meta.textContent = `${fmt(s.total_commands)} commands`;
+  body.innerHTML = `
+    <div class="cards" style="margin-bottom:14px">
+      <div class="card save"><div class="label">Tokens saved</div><div class="value">${fmt(s.total_saved)}</div><div class="sub">${(s.avg_savings_pct||0).toFixed(1)}% avg</div></div>
+      <div class="card save"><div class="label">Est. saved</div><div class="value">≈ ${money(estUsd)}</div><div class="sub">at ~$3/Mtok input</div></div>
+      <div class="card"><div class="label">Raw → sent</div><div class="value" style="font-size:20px">${fmt(s.total_input)} → ${fmt(s.total_output)}</div></div>
+    </div>
+    <canvas id="rtkChart"></canvas>`;
+  drawRtkDays(d.daily || []);
+}
+
+function drawRtkDays(daily) {
+  const cv = document.getElementById('rtkChart');
+  if (!cv) return;
+  const dpr = window.devicePixelRatio || 1;
+  const w = cv.clientWidth, h = cv.clientHeight;
+  cv.width = w * dpr; cv.height = h * dpr;
+  const ctx = cv.getContext('2d'); ctx.scale(dpr, dpr); ctx.clearRect(0, 0, w, h);
+  // daily entries: tolerate {date,saved} / {day,total_saved} shapes.
+  const rows = daily.map(r => ({ k: r.date || r.day || r.key || '', v: r.total_saved ?? r.saved ?? 0 }))
+                    .filter(r => r.k);
+  if (!rows.length) return;
+  const pad = 8, labelH = 14, max = Math.max(1, ...rows.map(r => r.v)), n = rows.length;
+  rows.forEach((r, i) => {
+    const x = pad + i * ((w - 2 * pad) / n);
+    const bw = Math.max(1, (w - 2 * pad) / n - 2);
+    const bh = (r.v / max) * (h - 2 * pad - labelH);
+    ctx.fillStyle = '#6aa6ff';
+    ctx.fillRect(x, h - labelH - bh, bw, bh);
+  });
+  ctx.fillStyle = getComputedStyle(document.body).getPropertyValue('--muted');
+  ctx.font = '10px ui-monospace, monospace';
+  ctx.fillText(rows[0].k, pad, h - 2);
+  const last = rows[n-1].k;
+  ctx.fillText(last, w - pad - ctx.measureText(last).width, h - 2);
+}
+
+function copyPrompt() {
+  navigator.clipboard.writeText(lastPrompt).then(() => {
+    const b = document.getElementById('copy-prompt');
+    b.textContent = 'Copied'; setTimeout(() => (b.textContent = 'Copy'), 1500);
+  });
 }
 
 function renderBars(elId, rows, label) {
@@ -152,30 +372,124 @@ function renderRows(recent) {
   }).join('');
 }
 
-function drawSpend(series) {
-  const cv = document.getElementById('spendChart');
-  const dpr = window.devicePixelRatio || 1;
-  const w = cv.clientWidth, h = cv.clientHeight;
-  cv.width = w * dpr; cv.height = h * dpr;
-  const ctx = cv.getContext('2d');
-  ctx.scale(dpr, dpr);
-  ctx.clearRect(0, 0, w, h);
-  if (!series.length) return;
-  let cum = 0; const pts = series.map(p => (cum += (p.cost || 0)));
-  const pad = 8;
-  const max = Math.max(1e-9, ...pts);
-  const n = pts.length;
-  const x = (i) => pad + (n === 1 ? 0 : (i / (n - 1)) * (w - 2 * pad));
-  const y = (v) => h - pad - (v / max) * (h - 2 * pad);
-  ctx.beginPath();
-  ctx.moveTo(x(0), y(0));
-  pts.forEach((v, i) => ctx.lineTo(x(i), y(v)));
-  ctx.lineTo(x(n - 1), h - pad); ctx.lineTo(x(0), h - pad); ctx.closePath();
-  ctx.fillStyle = 'rgba(90,209,154,0.10)'; ctx.fill();
-  ctx.beginPath();
-  pts.forEach((v, i) => { const px = x(i), py = y(v); i ? ctx.lineTo(px, py) : ctx.moveTo(px, py); });
-  ctx.strokeStyle = '#5ad19a'; ctx.lineWidth = 1.5; ctx.stroke();
+const COMP = {
+  cache_read:  { label: 'Cache reads',  color: '#6aa6ff' },
+  cache_write: { label: 'Cache writes', color: '#b083f0' },
+  output:      { label: 'Output',       color: '#5ad19a' },
+  input:       { label: 'Input',        color: '#f0b860' },
+};
+
+// Tools that reduce context-token volume (only relevant to context-bloat drivers).
+const TOOL_HEADROOM = { name: 'Headroom', what: 'context-compression proxy — shrinks tool outputs, files, and history before they reach the model. Targets exactly this driver.', url: 'https://github.com/headroomlabs-ai/headroom' };
+const TOOL_RTK = { name: 'rtk', what: 'rewrites/trims verbose shell & tool output (bundled by Headroom) so it stops bloating context.', url: 'https://github.com/headroomlabs-ai/headroom' };
+
+// Plain-English cause + fixes + Claude rules + relevant tools, keyed by dominant component.
+const DRIVER = {
+  cache_read: {
+    cause: 'Most of your spend is re-reading cached context. Large prompts get re-sent every turn, and long sessions multiply that across hundreds of turns.',
+    fixes: [
+      'Run /clear (or /compact) more often — start fresh once a task is done.',
+      'Keep fewer large files in context; reference paths instead of pasting.',
+      'Prefer shorter, focused sessions over one giant long-running session.',
+    ],
+    rules: [
+      'Keep context small: read only the file ranges you need; never paste large files when a path reference works.',
+      'Summarize long tool/command output instead of keeping it verbatim in context.',
+      'When a task is finished, tell me to /clear before starting an unrelated task.',
+      'Prefer several short focused sessions over one long-running session.',
+    ],
+    tools: [TOOL_HEADROOM, TOOL_RTK],
+  },
+  cache_write: {
+    cause: 'Cache writes dominate — context keeps changing, so the cache is rebuilt instead of reused. Cache churn costs ~1.25× input rate.',
+    fixes: [
+      'Avoid editing early context mid-session (it invalidates the cached prefix).',
+      'Batch related work so the stable prefix stays cached.',
+      'Watch for tools/system prompts that change every turn.',
+    ],
+    rules: [
+      'Do not modify earlier context mid-session — it invalidates the cached prefix and forces a rewrite.',
+      'Batch related edits/reads so the stable prefix stays cached.',
+    ],
+    tools: [TOOL_HEADROOM],
+  },
+  output: {
+    cause: 'Output tokens are the biggest cost — the model is generating a lot (long answers, verbose reasoning, big diffs).',
+    fixes: [
+      'Ask for terser output; avoid regenerating whole files when a diff will do.',
+      'Use a cheaper model for routine work (see $/Mtok by model).',
+      'Cap reasoning effort where high effort is not needed.',
+    ],
+    rules: [
+      'Be terse: no preamble or recap; answer then stop.',
+      'Edit files with minimal diffs — never reprint a whole file to change a few lines.',
+      'Use a cheaper model / lower reasoning effort for routine work.',
+    ],
+    tools: [],
+  },
+  input: {
+    cause: 'Fresh (uncached) input tokens dominate — large new prompts that are not being cached.',
+    fixes: [
+      'Enable / rely on prompt caching for repeated context.',
+      'Trim the prompt; send only what the turn needs.',
+    ],
+    rules: [
+      'Send only what the turn needs; trim boilerplate from prompts.',
+      'Reuse cached context instead of re-sending fresh large prompts.',
+    ],
+    tools: [TOOL_HEADROOM],
+  },
+};
+
+// Build a pasteable CLAUDE.md block from the dominant driver.
+function buildPrompt(key, pct, val, total) {
+  const info = DRIVER[key];
+  const label = COMP[key].label.toLowerCase();
+  const lines = [];
+  lines.push('# Cost discipline (generated by lite from your Claude Code usage)');
+  lines.push('');
+  lines.push(`Your spend is dominated by ${label} (~${pct}% — ${money(val)} of ${money(total)}). Follow these rules to keep cost down:`);
+  lines.push('');
+  info.rules.forEach(r => lines.push('- ' + r));
+  if (info.tools.length) {
+    lines.push('');
+    lines.push('If spend stays high, consider routing Claude Code through a token-reduction tool:');
+    info.tools.forEach(t => lines.push(`- ${t.name}: ${t.what} ${t.url}`));
+  }
+  return lines.join('\n');
 }
+
+function renderDriver(d) {
+  const el = document.getElementById('driver');
+  const parts = { cache_read: d.cost_cache_read, cache_write: d.cost_cache_write, output: d.cost_output, input: d.cost_input };
+  const total = d.cost_usd || 0;
+  if (total <= 0) { el.innerHTML = `<div class="empty">No spend in ${RANGE_LABEL[range] || range}.</div>`; return; }
+  const top = Object.entries(parts).sort((a, b) => b[1] - a[1])[0];
+  const [key, val] = top;
+  const pct = (val / total * 100).toFixed(0);
+  const info = DRIVER[key];
+  const win = (RANGE_LABEL[range] || range);
+  el.innerHTML = `
+    <div class="lead">Over <b style="color:var(--fg)">${win}</b> you spent <b style="color:var(--fg)">${money(total)}</b> — driven by <b>${COMP[key].label} (${pct}%, ${money(val)})</b></div>
+    <div class="cause">${info.cause}</div>
+    <ul class="fixes">${info.fixes.map(f => `<li>${f}</li>`).join('')}</ul>`;
+}
+
+// Stable per-model color, assigned from cost-sorted by_model so colors don't jump between ticks.
+const PALETTE = ['#5ad19a','#6aa6ff','#f0b860','#b083f0','#e06c9f','#f2785c','#4dd0c1','#c2d04d','#ff8fa3','#9aa6b2'];
+let dayColors = {};
+
+// Round a max value up to a clean axis bound (1/2/5 × 10^n).
+function niceCeil(v) {
+  if (v <= 0) return 1;
+  const p = Math.pow(10, Math.floor(Math.log10(v)));
+  const f = v / p;
+  const nf = f <= 1 ? 1 : f <= 2 ? 2 : f <= 5 ? 5 : 10;
+  return nf * p;
+}
+
+// Bar geometry kept around so the tooltip can hit-test on mousemove.
+let dayGeom = [];
 
 function drawDays(rows) {
   const cv = document.getElementById('dayChart');
@@ -186,35 +500,90 @@ function drawDays(rows) {
   ctx.scale(dpr, dpr);
   ctx.clearRect(0, 0, w, h);
   const meta = document.getElementById('day-meta');
-  if (!rows.length) { meta.textContent = ''; return; }
-  const pad = 8, labelH = 16;
-  const max = Math.max(1e-9, ...rows.map(r => r.cost_usd || 0));
+  const legend = document.getElementById('day-legend');
+  dayGeom = [];
+  if (!rows.length) { meta.textContent = ''; legend.innerHTML = ''; return; }
+
+  const padL = 54, padR = 12, padT = 12, labelH = 18;
+  const plotW = w - padL - padR, plotH = h - padT - labelH;
+  const niceMax = niceCeil(Math.max(...rows.map(r => r.cost_usd || 0)));
   const n = rows.length;
-  const gap = n > 60 ? 1 : 2;
-  const bw = Math.max(1, (w - 2 * pad) / n - gap);
-  const peak = rows.reduce((a, b) => (b.cost_usd > a.cost_usd ? b : a), rows[0]);
-  meta.textContent = `${rows[0].key} → ${rows[n-1].key} · peak ${money(peak.cost_usd)} (${peak.key})`;
-  rows.forEach((r, i) => {
-    const x = pad + i * ((w - 2 * pad) / n);
-    const bh = ((r.cost_usd || 0) / max) * (h - 2 * pad - labelH);
-    const grad = ctx.createLinearGradient(0, h - labelH - bh, 0, h - labelH);
-    grad.addColorStop(0, '#5ad19a'); grad.addColorStop(1, '#6aa6ff');
-    ctx.fillStyle = grad;
-    ctx.fillRect(x, h - labelH - bh, bw, bh);
-  });
-  // x-axis end labels
-  ctx.fillStyle = getComputedStyle(document.body).getPropertyValue('--muted');
+  const slot = plotW / n;
+  const bw = Math.max(1, slot - (n > 45 ? 1 : 3));
+  const muted = getComputedStyle(document.body).getPropertyValue('--muted');
+  const lineC = getComputedStyle(document.body).getPropertyValue('--line');
+  const yOf = (v) => padT + plotH - (v / niceMax) * plotH;
+
+  // gridlines + $ axis labels
   ctx.font = '10px ui-monospace, monospace';
-  ctx.fillText(rows[0].key, pad, h - 3);
+  const ticks = 5;
+  for (let i = 0; i <= ticks; i++) {
+    const v = niceMax * i / ticks, y = yOf(v);
+    ctx.strokeStyle = lineC; ctx.globalAlpha = 0.6;
+    ctx.beginPath(); ctx.moveTo(padL, y); ctx.lineTo(w - padR, y); ctx.stroke();
+    ctx.globalAlpha = 1; ctx.fillStyle = muted;
+    ctx.fillText('$' + (v >= 1 ? Math.round(v) : v.toFixed(2)), 6, y + 3);
+  }
+
+  // stacked bars (one segment per model, biggest at the bottom)
+  rows.forEach((r, i) => {
+    const x = padL + i * slot + (slot - bw) / 2;
+    let yTop = padT + plotH;
+    const segs = [];
+    (r.models || []).forEach(m => {
+      const segH = ((m.cost_usd || 0) / niceMax) * plotH;
+      if (segH > 0) {
+        yTop -= segH;
+        ctx.fillStyle = dayColors[m.key] || '#666';
+        ctx.fillRect(x, yTop, bw, segH);
+      }
+      segs.push({ model: m.key, cost: m.cost_usd, turns: m.turns });
+    });
+    dayGeom.push({ x, w: bw, slotX: padL + i * slot, slotW: slot, day: r.key, total: r.cost_usd, segs });
+  });
+
+  // x-axis end labels + meta
+  ctx.fillStyle = muted; ctx.font = '10px ui-monospace, monospace';
+  ctx.fillText(rows[0].key, padL, h - 4);
   const last = rows[n-1].key;
-  ctx.fillText(last, w - pad - ctx.measureText(last).width, h - 3);
+  ctx.fillText(last, w - padR - ctx.measureText(last).width, h - 4);
+  const peak = rows.reduce((a, b) => (b.cost_usd > a.cost_usd ? b : a), rows[0]);
+  meta.textContent = `${rows[0].key} → ${last} · peak ${money(peak.cost_usd)} (${peak.key})`;
+
+  // legend from the global model set
+  legend.innerHTML = Object.keys(dayColors).map(m =>
+    `<div class="item"><span class="sw" style="background:${dayColors[m]}"></span>${m}</div>`).join('');
+}
+
+// Hover tooltip: per-model raw spend + day total. Bound once.
+function initDayTip() {
+  const cv = document.getElementById('dayTip') && document.getElementById('dayChart');
+  const tip = document.getElementById('dayTip');
+  if (!cv || !tip) return;
+  cv.addEventListener('mousemove', (e) => {
+    const rect = cv.getBoundingClientRect();
+    const mx = e.clientX - rect.left;
+    const hit = dayGeom.find(g => mx >= g.slotX && mx <= g.slotX + g.slotW);
+    if (!hit) { tip.style.display = 'none'; return; }
+    const segHtml = hit.segs.filter(s => s.cost > 0).map(s =>
+      `<div class="tip-row"><span class="lbl"><span class="sw" style="background:${dayColors[s.model] || '#666'}"></span>${s.model}</span><span class="num">${money(s.cost)}</span></div>`).join('');
+    tip.innerHTML = `<div class="tip-date">${hit.day}</div>${segHtml || '<div class="tip-row"><span class="lbl">no spend</span></div>'}<div class="tip-total"><span>Total</span><span>${money(hit.total)}</span></div>`;
+    tip.style.display = 'block';
+    const tw = tip.offsetWidth;
+    let left = hit.x + hit.w / 2 - tw / 2;
+    left = Math.max(4, Math.min(left, cv.clientWidth - tw - 4));
+    tip.style.left = left + 'px';
+    tip.style.top = '8px';
+  });
+  cv.addEventListener('mouseleave', () => { tip.style.display = 'none'; });
 }
 
 async function tick() {
   try {
-    const r = await fetch('/api/usage?scope=' + scope);
+    const r = await fetch('/api/usage?scope=' + scope + '&range=' + range);
     const d = await r.json();
-    document.getElementById('src').textContent = scope === 'project' && d.project ? base(d.project) : '~/.claude transcripts';
+    document.getElementById('src').textContent =
+      (scope === 'project' && d.project ? base(d.project) : '~/.claude') + ' · ' + (RANGE_LABEL[range] || range);
     document.getElementById('updated').textContent = 'updated ' + new Date().toLocaleTimeString();
     document.getElementById('c-spend').textContent = money(d.cost_usd);
     document.getElementById('c-save').textContent = money(d.cache_savings_usd);
@@ -226,15 +595,21 @@ async function tick() {
     renderBars('sessions', d.by_session || [], (r) => `${shortId(r.key)} <small>· ${base(r.project)} · ${r.model || ''}</small>`);
     renderBars('projects', d.by_project || [], (r) => base(r.key));
     renderBars('models', d.by_model || [], (r) => r.key);
+    renderDriver(d);
+    renderTools(d);
     renderRows(d.recent || []);
-    drawSpend(d.series || []);
+    // Assign stable colors from cost-sorted models, then draw the stacked daily chart.
+    dayColors = {};
+    (d.by_model || []).forEach((m, i) => { dayColors[m.key] = PALETTE[i % PALETTE.length]; });
     drawDays(d.by_day || []);
   } catch (e) { /* dashboard may be momentarily unavailable */ }
 }
+setView('spend');
+initDayTip();
 tick();
 setInterval(tick, 2000);
 window.addEventListener('resize', tick);
-window.addEventListener('keydown', (e) => { if (e.key === 'r' || e.key === 'R') tick(); });
+window.addEventListener('keydown', (e) => { if (e.key === 'r' || e.key === 'R') { tick(); tickRtk(); } });
 </script>
 </body>
 </html>
