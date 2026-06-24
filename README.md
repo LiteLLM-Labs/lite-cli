@@ -57,27 +57,31 @@ codesign -s - -f ~/.local/bin/lite   # macOS only — see note below
 
 ```sh
 lite claude                      # launch Claude Code through the proxy, log everything
-lite claude --dashboard          # also open the live web dashboard
-lite claude -- --model opus      # args after `--` are forwarded to claude
+lite claude --litellm_dashboard  # also open the live web dashboard
+lite claude --model opus         # any claude flag passes straight through
 
 lite dashboard                   # spend dashboard at http://localhost:4097
 lite logs                        # latest session as a table
 lite logs --follow               # live tail
 ```
 
+Every claude flag passes through untouched — `lite claude <whatever you'd pass to claude>`. lite's
+own flags all live under the `--litellm_*` namespace so they never collide with claude's, which
+means **you almost never need `--`** (use it only to force a literal `--litellm_*` token to claude).
+
 ### Flags (`lite claude`)
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `--upstream <url>` | `$ANTHROPIC_BASE_URL` or `api.anthropic.com` | upstream base URL |
-| `--port <n>` | ephemeral | fixed proxy port |
-| `--log-dir <path>` | `~/.lite/logs` | log directory |
-| `--bodies` | off | log full request + response bodies |
-| `--dashboard` | off | also start the web dashboard + open browser |
+| `--litellm_upstream <url>` | `$ANTHROPIC_BASE_URL` or `api.anthropic.com` | upstream base URL |
+| `--litellm_port <n>` | ephemeral | fixed proxy port |
+| `--litellm_log_dir <path>` | `~/.lite/logs` | log directory |
+| `--litellm_bodies` | off | log full request + response bodies |
+| `--litellm_dashboard` | off | also start the web dashboard + open browser |
 | `--litellm_enable_rtk` | off | inject [rtk](https://github.com/rtk-ai/rtk)'s tool-output compression hook for this session |
 
-`--litellm_*` is lite's reserved flag namespace; lite strips these before launching `claude`,
-so they never reach Claude Code regardless of where you put them on the command line.
+`--litellm_*` is lite's reserved flag namespace; lite parses these (from anywhere on the line) and
+strips them before launching `claude`, so they never reach Claude Code.
 
 ## Spend dashboard
 

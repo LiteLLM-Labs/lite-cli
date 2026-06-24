@@ -54,19 +54,19 @@ enum Commands {
 #[derive(Args)]
 struct ClaudeArgs {
     /// Upstream base URL (default: $ANTHROPIC_BASE_URL or api.anthropic.com)
-    #[arg(long)]
+    #[arg(long = "litellm_upstream")]
     upstream: Option<String>,
     /// Fixed proxy port (default: ephemeral)
-    #[arg(long)]
+    #[arg(long = "litellm_port")]
     port: Option<u16>,
     /// Log directory (default: ~/.lite/logs)
-    #[arg(long)]
+    #[arg(long = "litellm_log_dir")]
     log_dir: Option<PathBuf>,
     /// Log full request + response bodies
-    #[arg(long)]
+    #[arg(long = "litellm_bodies")]
     bodies: bool,
     /// Also start the web dashboard and open it in the browser
-    #[arg(long)]
+    #[arg(long = "litellm_dashboard")]
     dashboard: bool,
     /// Enable rtk for this session: inject rtk's PreToolUse hook so Bash commands are
     /// rewritten to token-saving `rtk` equivalents (requires `rtk` on PATH).
