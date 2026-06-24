@@ -10,6 +10,17 @@ A thin Rust CLI that wraps [Claude Code](https://github.com/anthropics/claude-co
 | **Prompt compression** — rtk savings, in the dashboard | **Wraps Claude Code** — live spend in the status line |
 | ![rtk compression](docs/tools-rtk.png) | ![Wraps Claude Code](docs/claude_tui.png) |
 
+## Quickstart (under 30 seconds)
+
+1. See all your claude code spend, out of the box. 
+
+```sh
+lite dashboard
+# running on http://0.0.0.0:4097
+```
+
+![Spend dashboard](docs/spend-overview.png)
+
 ## What it does
 
 lite just does three things:
@@ -23,16 +34,6 @@ lite just does three things:
    model switching. → [Autorouter mode](#autorouter-mode)
 3. **Prompt compression** — one flag (`--litellm_enable_rtk`) injects [rtk](https://github.com/rtk-ai/rtk)'s
    tool-output compression, shrinking the tokens Claude Code sends back into context.
-
-Everything else stays out of the way: lite is a transparent proxy between `claude` and the
-upstream API (Anthropic or a LiteLLM gateway). It observes traffic — it doesn't transform it,
-except autorouting (opt-in) and rtk (opt-in).
-
-```
-claude  ──>  lite proxy (localhost)  ──>  upstream API (Anthropic / LiteLLM gateway)
-                  │
-                  └── JSONL logs + live spend dashboard
-```
 
 ## Install
 
@@ -52,6 +53,7 @@ codesign -s - -f ~/.local/bin/lite   # macOS only — see note below
 > **macOS note:** `cp` invalidates the binary's ad-hoc code signature on Apple Silicon, after
 > which the kernel kills it on launch (`zsh: killed`, exit 137). Re-sign with
 > `codesign -s - -f <path>` after copying. `install.sh` does this automatically.
+
 
 ## Usage
 
