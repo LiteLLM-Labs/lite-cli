@@ -21,6 +21,28 @@ If you're tempted to parse, rewrite, or re-inject something claude already provi
 almost certainly the wrong layer. (We learned this the hard way: an auth-token re-injection was
 added, then deleted once we confirmed claude sends `Authorization` itself.)
 
+## Autorouter mode — the one sanctioned exception
+
+`lite login` + `lite autorouter` write `~/.lite/settings.json` (gateway `api_base`/`api_key` + a
+model per complexity tier: `simple`/`medium`/`complex`/`reasoning`). When **all six** fields are
+present (`Settings::routing_enabled`), `lite claude` stops being verbatim and routes:
+
+- Upstream is the gateway `api_base`.
+- The proxy **parses the request body, rewrites `model`** to the tier model, and **injects the
+  gateway api key** (`Authorization: Bearer …`, dropping claude's own creds). This is the *only*
+  place we knowingly violate "stay thin" — it is gated entirely behind `state.routing.is_some()`;
+  with no config the transparent path is byte-for-byte unchanged.
+- **Classify-once-lock**: the first turn of a session (keyed by `x-claude-code-session-id`) decides
+  the tier via `classifier.rs`, and that tier is held for the whole session to keep Anthropic
+  prompt caching stable. The haiku small-fast slot always routes to `simple_model` and never sets
+  the lock.
+- `classifier.rs` is a faithful port of litellm's `router_strategy/complexity_router` (rule-based,
+  local, zero API calls) plus three Claude Code signals: the `thinking` field (→ reasoning), tool
+  count (gentle boost), and conversation context size.
+
+Keep routing logic in `classifier.rs` (pure scoring) and `proxy.rs` (the gated rewrite). Don't
+leak tier knowledge into pricing/log/presenters — they still just observe the *served* model.
+
 ## Layers — what goes where
 
 Data flows: **claude → proxy → upstream**, with the proxy teeing usage into a log, which readers
@@ -29,7 +51,10 @@ render. Each module has one job:
 | Module | Responsibility | Must NOT |
 |---|---|---|
 | `main.rs` | CLI parsing, process orchestration, env/settings resolution, launching `claude`, printing the session summary. | Contain HTTP, parsing, or pricing logic. |
-| `proxy.rs` | Transparent HTTP forward. Extract raw signals from the wire (status, headers like `x-claude-code-session-id`, streaming-ness) and the token usage. | Make business decisions. No cost math, no aggregation. |
+| `proxy.rs` | Transparent HTTP forward. Extract raw signals from the wire (status, headers like `x-claude-code-session-id`, streaming-ness) and the token usage. In autorouter mode only (gated on `state.routing`), rewrite `model` + inject gateway auth. | Make business decisions beyond routing. No cost math, no aggregation. |
+| `settings.rs` | Read/write `~/.lite/settings.json` (gateway creds + tier models, 0600). `routing_enabled` gate. | Network, pricing, HTTP. |
+| `classifier.rs` | Pure complexity scoring (port of litellm `complexity_router` + CC signals) → `Tier`. | Touch network/disk/state. Stateless. |
+| `login_cmd.rs` / `autorouter_cmd.rs` | Interactive setup: store creds; list gateway models and assign tier models. | Run during `lite claude`. Setup-only. |
 | `usage.rs` | Pure parsing of token usage from responses (SSE `message_start`/`message_delta` + non-stream JSON). | Touch the network, disk, or pricing. |
 | `pricing.rs` | The **pure cost model** — a faithful port of litellm's `generic_cost_per_token` (incl. tiered/threshold + service-tier + 5m/1h cache split via `cost_detailed`). Fetch/cache the price table; given tokens, return USD. | Know about requests, logs, or the dashboard. Stateless math + a cached table. |
 | `transcripts.rs` | **Pure reader of Claude Code's own logs** (`~/.claude/projects/**/*.jsonl`). One `Turn` per billable assistant response, de-duped by `message.id`. The spend source of truth. | Price anything, render, or write. |

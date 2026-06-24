@@ -20,6 +20,8 @@ futures-util = "0.3"
 bytes = "1"
 dirs = "5"
 tokio-util = { version = "0.7", features = ["rt"] }
+rpassword = "7"
+dialoguer = { version = "0.11", features = ["fuzzy-select"] }
 
 [profile.release]
 strip = true
