@@ -12,7 +12,7 @@ A thin Rust CLI that wraps [Claude Code](https://github.com/anthropics/claude-co
 
 ## Quickstart (under 30 seconds)
 
-1. See all your claude code spend, out of the box. 
+See all your claude code spend, out of the box. 
 
 ```sh
 lite dashboard
