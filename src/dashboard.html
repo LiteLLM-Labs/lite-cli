@@ -48,6 +48,19 @@
   .bar-row .name { color: var(--fg); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .bar-row .name small { color: var(--muted); }
   .bar-row .num { text-align: right; color: var(--muted); }
+  button.bar-row {
+    width: 100%; border: 0; background: transparent; color: inherit; padding: 0;
+    font: inherit; text-align: left; cursor: pointer;
+  }
+  .session-row {
+    border-radius: 6px; padding: 3px 4px; margin-left: -4px; margin-right: -4px;
+  }
+  .session-row:hover, .session-row.active { background: #0e1217; }
+  .session-row.active .name { color: var(--accent2); }
+  .link-cell {
+    border: 0; background: transparent; color: var(--accent2); padding: 0;
+    font: inherit; cursor: pointer;
+  }
   table { width: 100%; border-collapse: collapse; }
   th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--line); white-space: nowrap; }
   th { color: var(--muted); font-weight: 500; font-size: 11px; text-transform: uppercase; }
@@ -101,6 +114,57 @@
     padding: 5px 12px; font: inherit; font-size: 12px; cursor: pointer; }
   .rec-line b { color: var(--warn); }
   .rec-line { margin-bottom: 10px; }
+  /* session drill-down */
+  body.detail-open { overflow: hidden; }
+  .session-detail {
+    display: none; position: fixed; inset: 0; z-index: 100;
+    margin: 0; padding: 24px; border: 0; border-radius: 0;
+    background: rgba(3, 5, 8, .72);
+  }
+  .session-detail.open { display: flex; align-items: flex-start; justify-content: center; }
+  .session-modal {
+    width: min(1040px, calc(100vw - 48px)); max-height: calc(100vh - 48px);
+    overflow-y: auto; background: var(--panel); border: 1px solid var(--accent2);
+    border-radius: 10px; padding: 18px; box-shadow: 0 22px 70px rgba(0,0,0,.6);
+  }
+  .session-head {
+    display: flex; align-items: flex-start; justify-content: space-between; gap: 16px;
+    border-bottom: 1px solid var(--line); padding-bottom: 14px; margin-bottom: 14px;
+  }
+  .session-title { font-size: 20px; font-weight: 600; overflow-wrap: anywhere; }
+  .session-meta { color: var(--muted); font-size: 12px; margin-top: 4px; overflow-wrap: anywhere; }
+  .close-btn {
+    width: 30px; height: 30px; border-radius: 6px; border: 1px solid var(--line);
+    background: #0b0d10; color: var(--muted); font: inherit; cursor: pointer;
+  }
+  .session-cards {
+    display: grid; grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 12px; margin-bottom: 14px;
+  }
+  .mini-card { background: #0e1217; border: 1px solid var(--line); border-radius: 8px; padding: 12px; min-width: 0; }
+  .mini-card .label { color: var(--muted); font-size: 10px; text-transform: uppercase; letter-spacing: .6px; }
+  .mini-card .value { font-size: 18px; font-weight: 600; margin-top: 4px; overflow-wrap: anywhere; }
+  .model-chips { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 14px; }
+  .model-chip { border: 1px solid var(--line); border-radius: 6px; padding: 5px 8px; color: var(--muted); background: #0b0d10; }
+  .model-chip b { color: var(--fg); font-weight: 500; }
+  .timeline { border-top: 1px solid var(--line); }
+  .msg {
+    display: grid; grid-template-columns: 118px 1fr 220px; gap: 14px;
+    padding: 12px 0; border-bottom: 1px solid var(--line);
+  }
+  .msg-role { color: var(--fg); font-weight: 600; text-transform: lowercase; }
+  .msg-kind { color: var(--muted); font-size: 11px; margin-top: 2px; }
+  .msg-text { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; color: var(--fg); font: inherit; }
+  .msg-meta { text-align: right; color: var(--muted); font-size: 12px; overflow-wrap: anywhere; }
+  .msg.assistant .msg-role { color: var(--accent); }
+  .msg.user .msg-role { color: var(--accent2); }
+  @media (max-width: 900px) {
+    .session-detail { padding: 8px; }
+    .session-modal { width: calc(100vw - 16px); max-height: calc(100vh - 16px); }
+    .session-cards { grid-template-columns: 1fr 1fr; }
+    .msg { grid-template-columns: 1fr; gap: 6px; }
+    .msg-meta { text-align: left; }
+  }
 </style>
 </head>
 <body>
@@ -153,6 +217,22 @@
     <section id="driver-section" class="driver">
       <h2>What's driving your spend</h2>
       <div id="driver"><div class="empty">No data yet…</div></div>
+    </section>
+
+    <section id="session-detail" class="session-detail" role="dialog" aria-modal="true" aria-labelledby="session-title" onclick="if (event.target === this) closeSession()">
+      <div id="session-modal" class="session-modal">
+        <div class="session-head">
+          <div>
+            <h2>Session detail</h2>
+            <div class="session-title" id="session-title"></div>
+            <div class="session-meta" id="session-meta"></div>
+          </div>
+          <button class="close-btn" onclick="closeSession()" aria-label="Close session detail">x</button>
+        </div>
+        <div class="session-cards" id="session-cards"></div>
+        <div class="model-chips" id="session-models"></div>
+        <div class="timeline" id="session-messages"></div>
+      </div>
     </section>
 
     <section>
@@ -225,16 +305,25 @@ headroom wrap claude</pre>
 <script>
 let scope = 'all';
 let range = '30d';
+let selectedSession = '';
 const RANGE_LABEL = { today: 'today', '7d': 'last 7 days', '30d': 'last 30 days', all: 'all time' };
 const fmt = (n) => (n ?? 0).toLocaleString();
 const money = (n) => '$' + (n ?? 0).toLocaleString(undefined, { minimumFractionDigits: (n && n < 1 ? 4 : 2), maximumFractionDigits: 4 });
 const base = (p) => (p || '').split('/').filter(Boolean).pop() || p || '-';
 const shortId = (s) => (s || '').slice(0, 8);
+const esc = (v) => String(v ?? '').replace(/[&<>"']/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch]));
+const timeOnly = (ts) => ((ts || '').split('T')[1] || ts || '-').replace('Z','').split('.')[0];
+const dateTime = (ts) => {
+  if (!ts) return '-';
+  const d = new Date(ts);
+  return Number.isNaN(d.getTime()) ? ts : d.toLocaleString();
+};
 
 function setScope(s) {
   scope = s;
   document.getElementById('t-all').classList.toggle('active', s === 'all');
   document.getElementById('t-project').classList.toggle('active', s === 'project');
+  closeSession();
   tick();
 }
 
@@ -358,14 +447,97 @@ function renderBars(elId, rows, label) {
   }).join('');
 }
 
+function renderSessionBars(rows) {
+  const el = document.getElementById('sessions');
+  if (!rows.length) { el.innerHTML = '<div class="empty">No data yet…</div>'; return; }
+  const max = Math.max(1, ...rows.map(r => r.cost_usd || 0));
+  el.innerHTML = rows.map(r => {
+    const pct = ((r.cost_usd || 0) / max * 100).toFixed(1);
+    const active = selectedSession === r.key ? ' active' : '';
+    return `<button type="button" class="bar-row session-row${active}" data-session="${esc(r.key)}" onclick="openSession(this.dataset.session)">
+      <div class="name" title="${esc(r.key)}">${esc(shortId(r.key))} <small>· ${esc(base(r.project))} · ${esc(r.model || '')}</small></div>
+      <div class="bar-track"><div class="bar-fill" style="width:${pct}%"></div></div>
+      <div class="num">${money(r.cost_usd)} · ${fmt(r.input_tokens + r.output_tokens)} tok · ${fmt(r.turns)} turns</div>
+    </button>`;
+  }).join('');
+}
+
+function closeSession() {
+  selectedSession = '';
+  document.body.classList.remove('detail-open');
+  document.getElementById('session-detail').classList.remove('open');
+  document.querySelectorAll('.session-row.active').forEach(el => el.classList.remove('active'));
+}
+
+async function openSession(id) {
+  if (!id) return;
+  selectedSession = id;
+  document.querySelectorAll('.session-row').forEach(el =>
+    el.classList.toggle('active', el.dataset.session === id));
+  const detail = document.getElementById('session-detail');
+  document.body.classList.add('detail-open');
+  detail.classList.add('open');
+  document.getElementById('session-modal').scrollTop = 0;
+  document.getElementById('session-title').textContent = shortId(id);
+  document.getElementById('session-meta').textContent = id;
+  document.getElementById('session-cards').innerHTML = '';
+  document.getElementById('session-models').innerHTML = '';
+  document.getElementById('session-messages').innerHTML = '<div class="empty">Loading…</div>';
+  try {
+    const r = await fetch('/api/session?id=' + encodeURIComponent(id) + '&scope=' + scope);
+    renderSessionDetail(await r.json());
+  } catch {
+    document.getElementById('session-messages').innerHTML = '<div class="empty">Session unavailable.</div>';
+  }
+}
+
+function renderSessionDetail(d) {
+  if (!d || !d.found) {
+    document.getElementById('session-title').textContent = selectedSession ? shortId(selectedSession) : 'Session';
+    document.getElementById('session-meta').textContent = 'Not found';
+    document.getElementById('session-cards').innerHTML = '';
+    document.getElementById('session-models').innerHTML = '';
+    document.getElementById('session-messages').innerHTML = '<div class="empty">No transcript messages found.</div>';
+    return;
+  }
+  const title = d.title || shortId(d.session_id);
+  const tokenTotal = (d.input_tokens || 0) + (d.output_tokens || 0) + (d.cache_read_tokens || 0) + (d.cache_creation_tokens || 0);
+  document.getElementById('session-title').textContent = title;
+  document.getElementById('session-meta').textContent =
+    `${d.session_id} · ${base(d.project)} · ${dateTime(d.start_ts)} to ${dateTime(d.end_ts)}`;
+  document.getElementById('session-cards').innerHTML = `
+    <div class="mini-card"><div class="label">Spend</div><div class="value">${money(d.cost_usd)}</div></div>
+    <div class="mini-card"><div class="label">Tokens</div><div class="value">${fmt(tokenTotal)}</div></div>
+    <div class="mini-card"><div class="label">Turns</div><div class="value">${fmt(d.turns)}</div></div>
+    <div class="mini-card"><div class="label">Messages</div><div class="value">${fmt((d.messages || []).length)}</div></div>`;
+  document.getElementById('session-models').innerHTML = (d.models || []).map(m =>
+    `<div class="model-chip"><b>${esc(m.key)}</b> ${money(m.cost_usd)} · ${fmt(m.turns)} turns</div>`).join('');
+
+  const msgs = d.messages || [];
+  document.getElementById('session-messages').innerHTML = msgs.length ? msgs.map(m => {
+    const tok = (m.input_tokens || 0) + (m.output_tokens || 0) + (m.cache_read_tokens || 0) + (m.cache_creation_tokens || 0);
+    const meta = [
+      timeOnly(m.ts),
+      m.model || '',
+      tok ? fmt(tok) + ' tok' : '',
+      m.cost_usd ? money(m.cost_usd) : '',
+    ].filter(Boolean).map(esc).join('<br>');
+    return `<div class="msg ${esc(m.role)}">
+      <div><div class="msg-role">${esc(m.role || 'message')}</div><div class="msg-kind">${esc(m.kind || '')}</div></div>
+      <pre class="msg-text">${esc(m.text || '[' + (m.kind || 'message') + ']')}</pre>
+      <div class="msg-meta">${meta}</div>
+    </div>`;
+  }).join('') : '<div class="empty">No transcript messages found.</div>';
+}
+
 function renderRows(recent) {
   const el = document.getElementById('rows');
   if (!recent.length) { el.innerHTML = '<tr><td colspan="7" class="empty">No turns yet…</td></tr>'; return; }
   el.innerHTML = recent.map(r => {
-    const t = (r.ts.split('T')[1] || r.ts).replace('Z','').split('.')[0];
     return `<tr>
-      <td>${t}</td><td title="${r.project}">${base(r.project)}</td><td>${shortId(r.session_id)}</td>
-      <td>${r.model || '-'}</td>
+      <td>${esc(timeOnly(r.ts))}</td><td title="${esc(r.project)}">${esc(base(r.project))}</td>
+      <td><button class="link-cell" data-session="${esc(r.session_id)}" onclick="openSession(this.dataset.session)">${esc(shortId(r.session_id))}</button></td>
+      <td>${esc(r.model || '-')}</td>
       <td class="num">${fmt(r.input_tokens)}</td><td class="num">${fmt(r.output_tokens)}</td>
       <td class="num">${r.cost_usd ? money(r.cost_usd) : '-'}</td>
     </tr>`;
@@ -592,7 +764,7 @@ async function tick() {
     document.getElementById('c-turns').textContent = fmt(d.turns) + ' turns';
     document.getElementById('c-in').textContent = fmt(d.input_tokens);
     document.getElementById('c-out').textContent = fmt(d.output_tokens);
-    renderBars('sessions', d.by_session || [], (r) => `${shortId(r.key)} <small>· ${base(r.project)} · ${r.model || ''}</small>`);
+    renderSessionBars(d.by_session || []);
     renderBars('projects', d.by_project || [], (r) => base(r.key));
     renderBars('models', d.by_model || [], (r) => r.key);
     renderDriver(d);
@@ -609,7 +781,10 @@ initDayTip();
 tick();
 setInterval(tick, 2000);
 window.addEventListener('resize', tick);
-window.addEventListener('keydown', (e) => { if (e.key === 'r' || e.key === 'R') { tick(); tickRtk(); } });
+window.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') closeSession();
+  if (e.key === 'r' || e.key === 'R') { tick(); tickRtk(); }
+});
 </script>
 </body>
 </html>

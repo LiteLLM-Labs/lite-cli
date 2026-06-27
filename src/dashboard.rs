@@ -92,6 +92,38 @@ struct UsageResponse {
     recent: Vec<RecentTurn>,
 }
 
+#[derive(Serialize, Default)]
+struct SessionMessage {
+    ts: String,
+    role: String,
+    kind: String,
+    text: String,
+    model: String,
+    input_tokens: u64,
+    output_tokens: u64,
+    cache_read_tokens: u64,
+    cache_creation_tokens: u64,
+    cost_usd: f64,
+}
+
+#[derive(Serialize, Default)]
+struct SessionResponse {
+    found: bool,
+    session_id: String,
+    title: String,
+    project: String,
+    start_ts: String,
+    end_ts: String,
+    messages: Vec<SessionMessage>,
+    turns: u64,
+    input_tokens: u64,
+    output_tokens: u64,
+    cache_read_tokens: u64,
+    cache_creation_tokens: u64,
+    cost_usd: f64,
+    models: Vec<ModelCost>,
+}
+
 pub async fn serve(port: u16, _log_dir: std::path::PathBuf) -> Result<()> {
     let pricing = Pricing::load().await;
     let current_project = std::env::current_dir()
@@ -104,6 +136,7 @@ pub async fn serve(port: u16, _log_dir: std::path::PathBuf) -> Result<()> {
     let app = axum::Router::new()
         .route("/", get(root))
         .route("/api/usage", get(api_usage))
+        .route("/api/session", get(api_session))
         .route("/api/rtk", get(api_rtk))
         .with_state(state);
     let listener = tokio::net::TcpListener::bind(("127.0.0.1", port))
@@ -165,7 +198,12 @@ async fn api_usage(
     let cutoff = range_cutoff(range);
     let turns: Vec<Turn> = transcripts::read_all(project_filter.as_deref())
         .into_iter()
-        .filter(|t| cutoff.as_deref().map(|c| t.ts.as_str() >= c).unwrap_or(true))
+        .filter(|t| {
+            cutoff
+                .as_deref()
+                .map(|c| t.ts.as_str() >= c)
+                .unwrap_or(true)
+        })
         .collect();
 
     let mut by_session: BTreeMap<String, GroupRow> = BTreeMap::new();
@@ -203,13 +241,23 @@ async fn api_usage(
             .pricing
             .cache_savings(t.model.as_deref(), t.cache_read_tokens);
 
-        accumulate(by_session.entry(t.session_id.clone()).or_default(), t, &model, cost);
+        accumulate(
+            by_session.entry(t.session_id.clone()).or_default(),
+            t,
+            &model,
+            cost,
+        );
         // Label session rows by short id + project basename.
         let srow = by_session.get_mut(&t.session_id).unwrap();
         srow.key = t.session_id.clone();
         srow.project = t.project.clone();
 
-        accumulate(by_project.entry(t.project.clone()).or_default(), t, &model, cost);
+        accumulate(
+            by_project.entry(t.project.clone()).or_default(),
+            t,
+            &model,
+            cost,
+        );
         by_project.get_mut(&t.project).unwrap().key = t.project.clone();
 
         accumulate(by_model.entry(model.clone()).or_default(), t, &model, cost);
@@ -274,6 +322,99 @@ async fn api_usage(
     recent.reverse();
     recent.truncate(100);
     resp.recent = recent;
+    Json(resp)
+}
+
+async fn api_session(
+    State(state): State<Arc<DashState>>,
+    Query(params): Query<HashMap<String, String>>,
+) -> Json<SessionResponse> {
+    let session_id = params
+        .get("id")
+        .or_else(|| params.get("session_id"))
+        .cloned()
+        .unwrap_or_default();
+    let project_filter = if params.get("scope").map(|s| s == "project").unwrap_or(false) {
+        state.current_project.clone()
+    } else {
+        None
+    };
+
+    let mut resp = SessionResponse {
+        session_id: session_id.clone(),
+        ..Default::default()
+    };
+    if session_id.is_empty() {
+        return Json(resp);
+    }
+    let Some(session) = transcripts::read_session(&session_id, project_filter.as_deref()) else {
+        return Json(resp);
+    };
+
+    resp.found = true;
+    resp.session_id = session.session_id;
+    resp.title = session.title;
+    resp.project = session.project;
+
+    let mut by_model: BTreeMap<String, ModelCost> = BTreeMap::new();
+    for m in session.messages {
+        if resp.start_ts.is_empty() || (!m.ts.is_empty() && m.ts.as_str() < resp.start_ts.as_str())
+        {
+            resp.start_ts = m.ts.clone();
+        }
+        if m.ts.as_str() > resp.end_ts.as_str() {
+            resp.end_ts = m.ts.clone();
+        }
+
+        let bd = state.pricing.cost_breakdown(
+            m.model.as_deref(),
+            m.input_tokens,
+            m.output_tokens,
+            m.cache_read_tokens,
+            m.cache_creation_5m,
+            m.cache_creation_1h,
+            m.service_tier.as_deref(),
+        );
+        let cost = bd.total();
+        if m.has_usage {
+            resp.turns += 1;
+        }
+        resp.input_tokens += m.input_tokens;
+        resp.output_tokens += m.output_tokens;
+        resp.cache_read_tokens += m.cache_read_tokens;
+        resp.cache_creation_tokens += m.cache_creation_total();
+        resp.cost_usd += cost;
+
+        if let Some(model) = &m.model {
+            let mc = by_model.entry(model.clone()).or_default();
+            mc.key = model.clone();
+            mc.turns += 1;
+            mc.input_tokens += m.input_tokens;
+            mc.output_tokens += m.output_tokens;
+            mc.cost_usd += cost;
+        }
+
+        let cache_creation_tokens = m.cache_creation_total();
+        resp.messages.push(SessionMessage {
+            ts: m.ts,
+            role: m.role,
+            kind: m.kind,
+            text: m.text,
+            model: m.model.unwrap_or_default(),
+            input_tokens: m.input_tokens,
+            output_tokens: m.output_tokens,
+            cache_read_tokens: m.cache_read_tokens,
+            cache_creation_tokens,
+            cost_usd: cost,
+        });
+    }
+
+    resp.models = by_model.into_values().collect();
+    resp.models.sort_by(|a, b| {
+        b.cost_usd
+            .partial_cmp(&a.cost_usd)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
     Json(resp)
 }
 
